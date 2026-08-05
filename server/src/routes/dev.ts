@@ -4,13 +4,16 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { simDay, simNow } from "../sim/clock.ts";
+import { isRealTime, simDay, simNow } from "../sim/clock.ts";
 import { warp } from "../sim/warp.ts";
 import { seedDemo } from "../sim/seed-demo.ts";
+import { activeProviderName } from "../providers/index.ts";
 
 export async function devRoutes(app: FastifyInstance): Promise<void> {
   app.get("/api/dev/clock", async () => ({
-    simDay: simDay(),
+    mode: isRealTime() ? "real" : "sim",
+    provider: activeProviderName(),
+    simDay: isRealTime() ? null : simDay(),
     simTime: simNow().toISOString(),
   }));
 

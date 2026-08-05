@@ -17,7 +17,8 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
       .prepare(
         `SELECT e.pick_id, e.type, e.milestone_value, e.points, e.computed_at
            FROM score_events e JOIN picks p ON p.id = e.pick_id
-          WHERE p.user_id = ? ORDER BY e.computed_at`,
+          WHERE p.user_id = ? AND e.type != 'growth' -- growth shows in the totals, not as chips
+          ORDER BY e.computed_at`,
       )
       .all(user.id) as {
       pick_id: number;

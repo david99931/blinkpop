@@ -10,7 +10,11 @@ let db: DatabaseSync | null = null;
 export function getDb(): DatabaseSync {
   if (!db) {
     // Env is read here (not at module load) so tests can set FIRSTFAN_DB first.
-    const dbPath = process.env.FIRSTFAN_DB ?? path.join(serverRoot, "firstfan.db");
+    // Each mode gets its own world: sim picks and real picks never mix.
+    // (env check inlined rather than importing clock.ts — avoids an import cycle)
+    const defaultFile =
+      process.env.FIRSTFAN_PROVIDER === "soundcloud" ? "firstfan-live.db" : "firstfan.db";
+    const dbPath = process.env.FIRSTFAN_DB ?? path.join(serverRoot, defaultFile);
     db = new DatabaseSync(dbPath);
     db.exec("PRAGMA journal_mode = WAL;");
     db.exec("PRAGMA foreign_keys = ON;");

@@ -34,7 +34,7 @@ export function TrackPage({ id }: { id: string }) {
   const [locked, setLocked] = useState(false);
 
   useEffect(() => {
-    void api.get<TrackPageData>(`/api/tracks/mock/${id}`).then(setData);
+    void api.get<TrackPageData>(`/api/tracks/t/${id}`).then(setData);
     void api.get<MyPicks>("/api/picks/me").then(setMine);
   }, [id, world]);
 
@@ -68,7 +68,7 @@ export function TrackPage({ id }: { id: string }) {
   return (
     <div>
       <div className="row" style={{ alignItems: "flex-start" }}>
-        <Artwork id={id} title={track.title} large />
+        <Artwork id={id} title={track.title} large url={track.artworkUrl} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 className="h1" style={{ marginBottom: 2 }}>{track.title}</h1>
           <p className="sub">{track.artistName}</p>
@@ -95,7 +95,18 @@ export function TrackPage({ id }: { id: string }) {
       </div>
 
       <div className="section">
-        <FakePlayer />
+        {data.embed.kind === "widget" && data.embed.embedUrl ? (
+          <iframe
+            title={`Play ${track.title} on SoundCloud`}
+            src={data.embed.embedUrl}
+            width="100%"
+            height="166"
+            style={{ border: "none", borderRadius: 10, display: "block" }}
+            allow="autoplay"
+          />
+        ) : (
+          <FakePlayer />
+        )}
       </div>
 
       {data.sparkline.length > 1 && (

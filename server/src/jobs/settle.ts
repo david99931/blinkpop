@@ -88,6 +88,9 @@ export function settleDay(_simDayIndex: number): SettleResult {
         if (res.changes > 0) {
           eventsInserted++;
           pointsAwarded += d.points;
+          // Growth accrues every couple of hours — points move silently;
+          // notifications are reserved for milestone/early-bird moments.
+          if (d.type === "growth") continue;
           insertNotification.run(
             p.user_id,
             d.type === "milestone"

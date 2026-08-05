@@ -80,7 +80,7 @@ export function Home({ handle }: { handle: string }) {
         <div className="stack">
           {results.map((r) => (
             <a key={r.providerTrackId} className="trackrow" href={`#/track/${r.providerTrackId}`}>
-              <Artwork id={r.providerTrackId} title={r.title} />
+              <Artwork id={r.providerTrackId} title={r.title} url={r.artworkUrl} />
               <div className="meta">
                 <div className="title">{r.title}</div>
                 <div className="artist">{r.artistName}</div>

@@ -7,7 +7,8 @@ The CLAUDE.md one directory up (`Downloads/CLAUDE.md`) belongs to a different pr
 - Monorepo via npm workspaces: `shared/` (domain types + scoring config), `server/` (Fastify API + jobs), `web/` (React + Vite, mobile-first).
 - Database: **SQLite via Node's built-in `node:sqlite`** for Phase 1 — no Docker, no Postgres on this machine. Keep SQL portable; Postgres is the intended production target later.
 - No build step for `shared/` — server (tsx) and web (Vite) import its TS source directly.
-- Phase 1 is 100% offline: MockProvider + deterministic simulator. No SoundCloud calls, no credentials.
+- Provider switch: `FIRSTFAN_PROVIDER` in `server/.env` — `soundcloud` (real API, real time, polling jobs, DB `firstfan-live.db`) or unset/`mock` (simulator + time-warp, DB `firstfan.db`). Each mode has its own DB file; worlds never mix.
+- SoundCloud credentials live ONLY in `server/.env` (gitignored). Field reality check: likes are `favoritings_count` on track objects, not `likes_count` — verified live 2026-08-05; see `server/scripts/check-soundcloud.mjs`.
 
 ## Commands (run from repo root)
 - `npm run dev` — API server (port 3001)

@@ -59,6 +59,7 @@ export function buildFeed(userId: number, limit = 50): FeedItem[] {
          JOIN users u ON u.id = p.user_id
          JOIN tracks t ON t.id = p.track_id
         WHERE p.user_id IN (${placeholders})
+          AND e.type != 'growth' -- continuous drip would drown the feed
         ORDER BY e.computed_at DESC LIMIT ?`,
     )
     .all(...ids, limit) as {

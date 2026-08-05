@@ -12,6 +12,12 @@ Handoff document for Claude Code. Read this fully before writing code. Decisions
 > (reward for picking inside a track's first 100 / 1,000 plays, paid only when
 > the call proves out) and **§4.8 weekly super pick** (one extra pick per
 > user-local ISO week at 5× points). Game rule 9 added in §3.
+>
+> **v2.0 (2026-08-05):** founder redesign of the point engine — points now
+> accrue **continuously, proportional to plays gained** (settled every couple
+> of hours), with milestones demoted to bonuses (§4.3/§4.4 rewritten). The v1
+> weekly growth bonus is retired (continuous accrual supersedes it). §4.6
+> examples updated.
 
 ---
 
@@ -58,7 +64,7 @@ Keep it boring and readable. No microservices, no Redis, no queues unless a real
 5. **Eligibility — soft cap, not hard block.** Any track can be picked, but tracks by already-popular artists earn a near-zero underdog multiplier (see scoring). Optionally warn in the UI: "This artist is already popular — low point potential."
 6. **Scoring window:** each pick is "live" for **180 days** from pick time. After that it stops accruing points (portfolio still displays it forever).
 7. **Streaks:** consecutive days with a pick build a streak counter. Streak affects nothing in scoring for MVP — it is displayed for status only. **[OPEN]** streak point bonuses later.
-8. **Settlement cadence:** points are recalculated by a **daily batch job** for all live picks. Additionally, any track flagged "hot" (crossed a milestone in the last 7 days) is re-polled and re-scored **hourly** to give the app a live feel. Design the scoring job so cadence is a config value per track tier.
+8. **Settlement cadence (v2):** every live-picked track is re-polled and settled **every 2 hours** (growth accrues through the day); "hot" tracks (milestone crossed in the last 7 days) are re-polled **hourly**. Cadence is a config value.
 9. **Weekly super pick (v1.2):** on top of the daily pick, each user gets **one super pick per user-local ISO week** (Monday reset). It is an extra pick — it does not consume the daily slot — and every point it earns is multiplied 5× (§4.8). All other rules apply unchanged (immutable, never the same track twice across daily+super, 180-day window, normal pick_rank).
 
 ---
@@ -106,20 +112,24 @@ of `A`.
 Artist identity: provider-scoped (mock: exact artist name; SoundCloud: the
 user id behind the track).
 
-### 4.3 Milestone points (primary point source)
+### 4.3 Continuous growth accrual (primary point source, v2)
 
-Points are awarded when the track **crosses absolute play milestones after the pick**. Milestones already passed at pick time never pay out (this stays keyed to the track baseline `B`).
-
-```
-MILESTONES = [10k, 25k, 50k, 100k, 250k, 500k, 1M, 2.5M, 5M, 10M]
-BASE_POINTS = [ 10,  15,  25,   40,   75,  125, 250,  400, 650, 1000]
-```
-
-Award for each milestone M crossed while the pick is live:
+Points accrue **proportionally to plays gained**, settled every couple of
+hours (each snapshot pass), so a portfolio moves through the day like a stock
+ticker instead of jumping at milestones:
 
 ```
-points = BASE_POINTS[M] × underdog(A) × orderDecay(rank)
+points = plays gained × (1 / 1,000) × underdog(A) × orderDecay(rank) × super
 ```
+
+Mechanics:
+- Emitted as `growth` score events, one per snapshot that has banked enough
+  gain; tiny gains **bank** until they are worth ≥ 1 point (no dust events).
+  The awarded total always telescopes to `(current − baseline) / 1000 × mult`
+  regardless of how often settlement runs — pure and idempotent.
+- Only accrues inside the 180-day live window.
+- Growth events are silent: no notifications, hidden from the feed (the drip
+  would drown it). Milestone/early-bird moments carry the fanfare.
 
 `orderDecay(rank)` — rank is the user's position among all users who picked T (1 = first):
 
@@ -129,9 +139,23 @@ orderDecay(rank) = max(0.25, 0.9 ^ (rank − 1))
 
 First picker gets 1.0, second 0.9, third 0.81 … floor at 0.25.
 
-### 4.4 Growth bonus (secondary, weekly)
+### 4.4 Milestone bonuses (secondary, v2 — was the primary source in v1)
 
-Weekly job: for each live pick, if the track's plays grew ≥ 50% week-over-week AND gained ≥ 2,500 plays that week, award `25 × underdog(A) × orderDecay(rank)`. Captures steady risers that sit between milestones. Both conditions required (percent alone is noise on tiny tracks; absolute alone favors big tracks).
+Bonus points when the track **crosses absolute play milestones after the pick**. Milestones already passed at pick time never pay out (this stays keyed to the track baseline `B`).
+
+```
+MILESTONES = [10k, 25k, 50k, 100k, 250k, 500k, 1M, 2.5M, 5M, 10M]
+BASE_POINTS = [ 10,  15,  25,   40,   75,  125, 250,  400, 650, 1000]
+```
+
+Award for each milestone M crossed while the pick is live:
+
+```
+points = BASE_POINTS[M] × underdog(A) × orderDecay(rank) × super
+```
+
+*(The v1 weekly growth bonus is retired — continuous accrual pays the same
+growth, better. Legacy `weekly_growth` score events remain valid in old data.)*
 
 ### 4.5 Engagement signals **[OPEN — v1.1, design for it, don't build yet]**
 
@@ -139,14 +163,14 @@ Reposts/likes velocity as an "early heat" bonus. Leave columns in snapshots for 
 
 ### 4.6 Worked examples (use as unit-test fixtures)
 
-Each story artist below has exactly one track, so `A = B` at pick time and the
-v1.0 numbers carry over unchanged.
+Each story artist below has exactly one track, so `A = B` at pick time.
+Numbers are v2 (growth accrual + milestone bonuses).
 
-1. **The dream call:** picked at B = 600 plays, artist averaging 600 (underdog 10.0), first picker (decay 1.0). Track runs to 1.2M in 90 days. Milestones crossed: 10k→1M, all 7 → (10+15+25+40+75+125+250) × 10 = **5,400 pts**.
-2. **Late to the party:** same track, picked when it (and the artist's average) sits at 300,000 (underdog 0.3), 14th picker (decay 0.9^13 ≈ 0.254). Crosses 500k and 1M → (125+250) × 0.3 × 0.254 ≈ **29 pts**.
-3. **The flatline:** picked at B = 2,000, track ends at 6,000 plays. No milestone crossed, no weekly bonus large enough → **0 pts**. Most picks score 0 or near-0. That's correct — rarity is the product.
-4. **Big-artist pick:** picked at B = 4M, artist averaging 4M (underdog 0.05), crosses 5M and 10M → (650+1000) × 0.05 = **82.5 pts** (before decay). A mega-hit run earns less than one true early call. Verify this ratio holds in tests; it is the core balance invariant.
-5. **The exploit that must stay dead (v1.1):** a 600-play track that runs to 1.2M — but by an artist averaging 4M plays. Underdog(A) = 0.05, so all 7 milestones pay 540 × 0.05 = **27 pts**, not 5,400. New single ≠ new artist.
+1. **The dream call:** picked at B = 600 plays, artist averaging 600 (underdog 10.0), first picker (decay 1.0). Track runs to 1.2M in 90 days. Growth: (1,200,000 − 600)/1000 × 10 ≈ **11,994 pts**, accruing continuously. Milestone bonuses: all 7 from 10k→1M → (10+15+25+40+75+125+250) × 10 = **5,400 pts**. Early bird (< 1k): +200. Total ≈ **17,594 pts**.
+2. **Late to the party:** same track, picked when it (and the artist's average) sits at 300,000 (underdog 0.3), 14th picker (decay 0.9^13 ≈ 0.254). Milestone bonuses 500k + 1M → (125+250) × 0.3 × 0.254 ≈ **29 pts**, plus growth ≈ (900k/1000) × 0.3 × 0.254 ≈ 69 pts.
+3. **The flatline:** picked at B = 2,000, track drifts to ~6,200. No milestone, no bonuses — just a growth drip of ≈ **21 pts**. Noise. Rarity of BIG numbers is the product; near-zero is still the common outcome.
+4. **Big-artist pick:** picked at B = 4M, artist averaging 4M (underdog 0.05), runs to 10M: growth 6,000 × 0.05 = **300 pts** + milestone bonuses (650+1000) × 0.05 = **82.5** → ≈ 382.5 total. A mega-hit run still earns a fraction of one true early call (≈ 46× less). Verify this ratio holds in tests; it is the core balance invariant.
+5. **The exploit that must stay dead (v1.1):** a 600-play track that runs to 1.2M — but by an artist averaging 4M plays. Underdog(A) = 0.05 applies to growth AND bonuses → ~627 pts total, not ~17.6k. New single ≠ new artist.
 
 ### 4.7 Early-bird bonus (v1.2)
 

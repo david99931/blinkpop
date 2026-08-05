@@ -30,6 +30,10 @@ const pick = (over: Partial<Parameters<typeof scorePick>[0]> = {}) => ({
 
 const milestonePoints = (events: ReturnType<typeof scorePick>) =>
   events.filter((e) => e.type === "milestone").reduce((s, e) => s + e.points, 0);
+const growthPoints = (events: ReturnType<typeof scorePick>) =>
+  events.filter((e) => e.type === "growth").reduce((s, e) => s + e.points, 0);
+const totalPoints = (events: ReturnType<typeof scorePick>) =>
+  events.reduce((s, e) => s + e.points, 0);
 
 describe("orderDecay", () => {
   it("1.0 for first, 0.9 for second, floors at 0.25", () => {
@@ -41,13 +45,15 @@ describe("orderDecay", () => {
   });
 });
 
-describe("§4.6 ex.1 — the dream call", () => {
-  it("B=600, rank 1, runs to 1.2M in 90 days → 5,400 milestone pts", () => {
+describe("§4.6 ex.1 — the dream call (v2)", () => {
+  it("B=600, rank 1, runs to 1.2M: ~12k growth pts + 5,400 milestone bonus", () => {
     const events = scorePick(
       pick(),
       series([[30, 9_000], [45, 60_000], [60, 240_000], [75, 550_000], [90, 1_200_000]]),
     );
-    // 7 milestones crossed (10k→1M), each × underdog 10 × decay 1
+    // Growth (primary): (1,200,000 − 600) / 1000 × underdog 10 × decay 1
+    expect(growthPoints(events)).toBeCloseTo(11_994, 10);
+    // Milestone bonuses: 7 crossed (10k→1M), each × 10 × 1
     expect(events.filter((e) => e.type === "milestone")).toHaveLength(7);
     expect(milestonePoints(events)).toBe(5400);
   });
@@ -65,13 +71,16 @@ describe("§4.6 ex.2 — late to the party", () => {
   });
 });
 
-describe("§4.6 ex.3 — the flatline", () => {
-  it("B=2,000 ending at 6,000 → exactly 0 points, ever", () => {
+describe("§4.6 ex.3 — the flatline (v2)", () => {
+  it("B=2,000 ending at 6,200 → a 21-pt drip, no milestones, no bonuses", () => {
     const events = scorePick(
       pick({ baselinePlays: 2_000 }),
       series([[30, 3_500], [60, 5_000], [90, 6_000], [180, 6_200]]),
     );
-    expect(events).toHaveLength(0);
+    expect(events.filter((e) => e.type === "milestone")).toHaveLength(0);
+    expect(events.filter((e) => e.type === "early_bird")).toHaveLength(0);
+    // 4,200 gained × 5× tier / 1000 = 21 — noise next to a real call's ~17k.
+    expect(growthPoints(events)).toBeCloseTo(21, 10);
   });
 });
 
@@ -87,9 +96,21 @@ describe("§4.6 ex.4 — big-artist pick", () => {
 
 describe("core balance invariant", () => {
   it("one true early call beats a mega-hit run by a wide margin", () => {
-    // 5,400 vs 82.5 — assert the ratio stays above 10× so config tuning can't
-    // silently invert the game's whole point.
-    expect(5400 / 82.5).toBeGreaterThan(10);
+    // Computed through the live engine so config tuning can't silently
+    // invert the game's whole point. v2: ~17.6k vs ~382.5 (≈46×).
+    const dream = totalPoints(
+      scorePick(
+        pick({ artistAvgPlays: 600 }),
+        series([[30, 9_000], [45, 60_000], [60, 240_000], [75, 550_000], [90, 1_200_000]]),
+      ),
+    );
+    const megaHit = totalPoints(
+      scorePick(
+        pick({ baselinePlays: 4_000_000, artistAvgPlays: 4_000_000 }),
+        series([[13, 5_040_000], [75, 10_000_000]]),
+      ),
+    );
+    expect(dream / megaHit).toBeGreaterThan(10);
   });
 });
 
@@ -100,60 +121,71 @@ describe("milestone rules", () => {
       series([[10, 60_000]]),
     );
     // 10k and 25k were already passed; only 50k pays: 25 × 2.5 × 1
-    expect(events).toHaveLength(1);
-    expect(events[0]!.milestoneValue).toBe(50_000);
-    expect(events[0]!.points).toBe(62.5);
+    const milestones = events.filter((e) => e.type === "milestone");
+    expect(milestones).toHaveLength(1);
+    expect(milestones[0]!.milestoneValue).toBe(50_000);
+    expect(milestones[0]!.points).toBe(62.5);
   });
 
-  it("crossings after the 180-day window pay nothing", () => {
+  it("anything after the 180-day window pays nothing", () => {
     const events = scorePick(
       pick({ baselinePlays: 2_000 }),
       series([[179, 9_000], [181, 500_000]]),
     );
-    expect(events).toHaveLength(0);
+    // day 181 is out of window: no milestone from the 500k jump, and growth
+    // only counts the in-window snapshot (9,000 − 2,000 = 7,000 → 35 pts).
+    expect(events.filter((e) => e.type === "milestone")).toHaveLength(0);
+    expect(growthPoints(events)).toBeCloseTo(35, 10);
   });
 
   it("a crossing on the last in-window day still pays", () => {
     const events = scorePick(pick({ baselinePlays: 2_000 }), series([[180, 12_000]]));
-    expect(events).toHaveLength(1);
-    expect(events[0]!.milestoneValue).toBe(10_000);
+    const milestones = events.filter((e) => e.type === "milestone");
+    expect(milestones).toHaveLength(1);
+    expect(milestones[0]!.milestoneValue).toBe(10_000);
   });
 });
 
-describe("weekly growth bonus (§4.4)", () => {
-  it("pays when BOTH ≥50% WoW and ≥2,500 gained", () => {
+describe("continuous growth accrual (§4.3 v2)", () => {
+  it("pays proportionally: 1 pt per 1,000 plays gained × multipliers", () => {
     const events = scorePick(
-      pick({ baselinePlays: 6_000 }),
-      series([[7, 9_100]]), // +51.7%, +3,100
+      pick({ baselinePlays: 6_000 }), // 5× tier via baseline fallback
+      series([[7, 9_100]]),
     );
-    const weekly = events.filter((e) => e.type === "weekly_growth");
-    expect(weekly).toHaveLength(1);
-    expect(weekly[0]!.points).toBe(125); // 25 × underdog 5.0 × decay 1
-    expect(weekly[0]!.dedupeKey).toBe("pick:1:weekly:1");
+    const growth = events.filter((e) => e.type === "growth");
+    expect(growth).toHaveLength(1);
+    expect(growth[0]!.points).toBeCloseTo(3_100 * 0.005, 10); // 15.5
+    expect(growth[0]!.dedupeKey).toBe(`pick:1:growth:${iso(7)}`);
   });
 
-  it("percent alone is not enough (tiny track noise)", () => {
+  it("banks tiny gains until they're worth a whole point (no dust events)", () => {
     const events = scorePick(
-      pick({ baselinePlays: 1_500 }),
-      series([[7, 3_000]]), // +100% but only +1,500
+      pick(), // B=600, 10× tier → 0.01 pt per play
+      series([[1, 620], [2, 680], [3, 750]]),
     );
-    expect(events.filter((e) => e.type === "weekly_growth")).toHaveLength(0);
+    const growth = events.filter((e) => e.type === "growth");
+    // 0.2 then 0.8 banked, third snapshot releases the lot: 150 × 0.01 = 1.5
+    expect(growth).toHaveLength(1);
+    expect(growth[0]!.occurredAt).toBe(iso(3));
+    expect(growth[0]!.points).toBeCloseTo(1.5, 10);
   });
 
-  it("absolute alone is not enough (big tracks drift)", () => {
-    const events = scorePick(
-      pick({ baselinePlays: 400_000 }),
-      series([[7, 410_000]]), // +10,000 but only +2.5%
+  it("total telescopes to (final − baseline) regardless of snapshot cadence", () => {
+    const sparse = scorePick(pick(), series([[90, 500_600]]));
+    const dense = scorePick(
+      pick(),
+      series(Array.from({ length: 90 }, (_, i) => [i + 1, 600 + ((i + 1) * 500_000) / 90] as [number, number])),
     );
-    expect(events.filter((e) => e.type === "weekly_growth")).toHaveLength(0);
+    expect(growthPoints(sparse)).toBeCloseTo(5_000, 5);
+    expect(growthPoints(dense)).toBeCloseTo(5_000, 5);
   });
 
-  it("an incomplete week (no snapshot at week's end yet) does not settle", () => {
+  it("growth accrual uses the artist tier", () => {
     const events = scorePick(
-      pick({ baselinePlays: 6_000 }),
-      series([[6, 9_500]]), // big gain but the week isn't over in the data
+      pick({ baselinePlays: 6_000, artistAvgPlays: 2_000_000 }), // 0.05×
+      series([[7, 106_000]]),
     );
-    expect(events.filter((e) => e.type === "weekly_growth")).toHaveLength(0);
+    expect(growthPoints(events)).toBeCloseTo(100_000 * 0.05 * 0.001, 10); // 5
   });
 });
 
@@ -179,27 +211,20 @@ describe("artist-based tiers (equal value per artist)", () => {
       pick({ baselinePlays: 30_000, artistAvgPlays: 800 }),
       series([[10, 60_000]]),
     );
-    expect(events).toHaveLength(1);
-    expect(events[0]!.points).toBe(250); // 25 base (50k) × 10 × 1
+    const milestones = events.filter((e) => e.type === "milestone");
+    expect(milestones).toHaveLength(1);
+    expect(milestones[0]!.points).toBe(250); // 25 base (50k) × 10 × 1
   });
 
-  it("weekly growth bonus uses the artist tier too", () => {
-    const events = scorePick(
-      pick({ baselinePlays: 6_000, artistAvgPlays: 2_000_000 }),
-      series([[7, 9_100]]),
-    );
-    const weekly = events.filter((e) => e.type === "weekly_growth");
-    expect(weekly).toHaveLength(1);
-    expect(weekly[0]!.points).toBeCloseTo(25 * 0.05, 10);
-  });
 });
 
 describe("super pick (5×) and early-bird bonus (v1.2)", () => {
   const run = series([[30, 9_000], [45, 60_000], [60, 240_000], [75, 550_000], [90, 1_200_000]]);
 
-  it("super pick multiplies every event by 5 — the dream call at 27,000", () => {
+  it("super pick multiplies every event by 5 — milestones, growth, early bird", () => {
     const events = scorePick(pick({ kind: "super", artistAvgPlays: 600 }), run);
     expect(milestonePoints(events)).toBe(27_000); // 5,400 × 5
+    expect(growthPoints(events)).toBeCloseTo(59_970, 8); // 11,994 × 5
     const early = events.find((e) => e.type === "early_bird")!;
     expect(early.points).toBe(20 * 10 * 5); // early bird rides the 5× too
   });

@@ -70,6 +70,7 @@ export interface SearchResult {
   providerTrackId: string;
   title: string;
   artistName: string;
+  artworkUrl: string | null;
   currentPlays: number | null;
   artistAvgPlays: number | null;
   tier: Tier | null;
@@ -85,10 +86,12 @@ export interface TrackPageData {
     providerTrackId: string;
     title: string;
     artistName: string;
+    artworkUrl: string | null;
     artistAvgPlays: number | null;
     stats: { plays: number | null; likes: number | null; reposts: number | null };
   };
   tier: Tier | null;
+  embed: { kind: "widget" | "fake"; embedUrl: string | null };
   sparkline: SnapshotPoint[];
   pickers: {
     rank: number;
@@ -174,6 +177,8 @@ export interface NotificationsData {
 }
 
 export interface ClockData {
-  simDay: number;
+  mode: "sim" | "real";
+  provider: string;
+  simDay: number | null;
   simTime: string;
 }

@@ -36,7 +36,28 @@ export function artStyle(id: string): { background: string } {
   };
 }
 
-export function Artwork({ id, title, large }: { id: string; title: string; large?: boolean }) {
+export function Artwork({
+  id,
+  title,
+  large,
+  url,
+}: {
+  id: string;
+  title: string;
+  large?: boolean;
+  url?: string | null;
+}) {
+  if (url) {
+    return (
+      <img
+        className={`art${large ? " lg" : ""}`}
+        src={url}
+        alt=""
+        loading="lazy"
+        style={{ objectFit: "cover" }}
+      />
+    );
+  }
   return (
     <div className={`art${large ? " lg" : ""}`} style={artStyle(id)} aria-hidden>
       {title.charAt(0).toUpperCase()}

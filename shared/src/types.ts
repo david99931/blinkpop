@@ -68,7 +68,8 @@ export interface Pick {
   status: PickStatus;
 }
 
-export type ScoreEventType = "milestone" | "weekly_growth" | "early_bird";
+/** "weekly_growth" is legacy (v1 picks may hold old events); new accrual emits "growth". */
+export type ScoreEventType = "milestone" | "weekly_growth" | "early_bird" | "growth";
 
 export interface ScoreEvent {
   id: number;

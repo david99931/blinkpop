@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { underdogTierFor } from "@firstfan/shared";
-import { getProvider } from "../providers/index.ts";
+import { activeProviderName, getActiveProvider } from "../providers/index.ts";
 import { getDb } from "../db/db.ts";
 
 /**
@@ -21,8 +21,8 @@ function trackPageExtras(providerTrackId: string): {
 } {
   const db = getDb();
   const track = db
-    .prepare("SELECT id FROM tracks WHERE provider = 'mock' AND provider_track_id = ?")
-    .get(providerTrackId) as { id: number } | undefined;
+    .prepare("SELECT id FROM tracks WHERE provider = ? AND provider_track_id = ?")
+    .get(activeProviderName(), providerTrackId) as { id: number } | undefined;
   if (!track) return { sparkline: [], pickers: [] };
 
   const sparkline = db
@@ -63,7 +63,7 @@ function trackPageExtras(providerTrackId: string): {
 
 export async function trackRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Querystring: { q?: string } }>("/api/tracks/search", async (req) => {
-    const provider = getProvider("mock");
+    const provider = getActiveProvider();
     const results = await provider.searchTracks(req.query.q ?? "");
     return {
       results: results.map((r) => {
@@ -73,10 +73,11 @@ export async function trackRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  // "t" = the active provider's namespace; the app runs one provider at a time.
   app.get<{ Params: { providerTrackId: string } }>(
-    "/api/tracks/mock/:providerTrackId",
+    "/api/tracks/t/:providerTrackId",
     async (req, reply) => {
-      const provider = getProvider("mock");
+      const provider = getActiveProvider();
       try {
         const track = await provider.getTrack(req.params.providerTrackId);
         const tierInput = track.artistAvgPlays ?? track.stats.plays;

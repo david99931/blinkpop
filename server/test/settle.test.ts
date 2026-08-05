@@ -66,8 +66,18 @@ describe("settlement after 100 simulated days", () => {
     expect(milestoneTotal(bob.id)).toBe(82.5);
   });
 
-  it("carol (flatline) has exactly 0 points", () => {
-    expect(totalPoints(carol.id)).toBe(0);
+  it("carol (flatline) gets only a noise-level growth drip — no milestones, no bonuses", () => {
+    // v2: growth accrues proportionally, so even the flatline drips a little
+    // (~20 pts for +4k plays at 5× tier) — trivial next to alice's thousands.
+    const events = getDb()
+      .prepare(
+        `SELECT e.type, COUNT(*) AS n FROM score_events e
+           JOIN picks p ON p.id = e.pick_id WHERE p.user_id = ? GROUP BY e.type`,
+      )
+      .all(carol.id) as { type: string; n: number }[];
+    expect(events.every((e) => e.type === "growth")).toBe(true);
+    expect(totalPoints(carol.id)).toBeGreaterThan(0);
+    expect(totalPoints(carol.id)).toBeLessThan(25);
   });
 
   it("dana (rank 2 at ~310k baseline) got 500k+1M at 0.3 × 0.9", () => {

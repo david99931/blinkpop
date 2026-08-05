@@ -7,17 +7,15 @@
  */
 
 import {
+  GROWTH,
   MILESTONES,
   ORDER_DECAY,
   SUPER_PICK,
-  WEEKLY_GROWTH,
   earlyBirdTierFor,
   underdogTierFor,
   type PickKind,
   type ScoreEventType,
 } from "@firstfan/shared";
-
-const WEEK_MS = 7 * 86_400_000;
 
 export interface ScoringPickInput {
   pickId: number;
@@ -113,35 +111,27 @@ export function scorePick(
     });
   }
 
-  // ── Weekly growth bonus (§4.4): consecutive 7-day windows from pick time.
-  // A week only settles once a snapshot at/after its end exists. BOTH
-  // conditions required: ≥50% week-over-week AND ≥2,500 absolute gain.
-  const playsAt = (ms: number): number => {
-    let latest = B;
-    for (const s of snaps) {
-      if (s.ms > ms) break;
-      latest = s.plays;
-    }
-    return latest;
-  };
-  const lastObservedMs = snaps.length > 0 ? snaps[snaps.length - 1]!.ms : pickedMs;
-  for (let week = 1; ; week++) {
-    const endMs = pickedMs + week * WEEK_MS;
-    if (endMs > expiresMs || endMs > lastObservedMs) break;
-    const start = playsAt(endMs - WEEK_MS);
-    const end = playsAt(endMs);
-    const gained = end - start;
-    const grewEnough = start === 0 ? gained > 0 : gained / start >= WEEKLY_GROWTH.minPercentWoW;
-    if (gained >= WEEKLY_GROWTH.minAbsoluteGain && grewEnough) {
-      events.push({
-        pickId: pick.pickId,
-        type: "weekly_growth",
-        milestoneValue: null,
-        points: WEEKLY_GROWTH.basePoints * multiplier,
-        dedupeKey: `pick:${pick.pickId}:weekly:${week}`,
-        occurredAt: new Date(endMs).toISOString(),
-      });
-    }
+  // ── Continuous growth accrual (§4.3 v2, PRIMARY source): points
+  // proportional to plays gained, emitted per snapshot. Gains bank up from
+  // the last awarded snapshot until they're worth ≥ minEventPoints, so the
+  // award total telescopes to (last awarded plays − B) × rate × multiplier —
+  // identical no matter how often settlement runs (pure + idempotent).
+  const rate = GROWTH.pointsPer1k / 1000;
+  let anchorPlays = B;
+  for (const s of snaps) {
+    const gained = s.plays - anchorPlays;
+    if (gained <= 0) continue;
+    const points = gained * rate * multiplier;
+    if (points < GROWTH.minEventPoints) continue;
+    events.push({
+      pickId: pick.pickId,
+      type: "growth",
+      milestoneValue: null,
+      points,
+      dedupeKey: `pick:${pick.pickId}:growth:${s.iso}`,
+      occurredAt: s.iso,
+    });
+    anchorPlays = s.plays;
   }
 
   return events;

@@ -15,7 +15,7 @@ export default function App() {
   const world = useWorldVersion();
   const [me, setMe] = useState<UserInfo | null | undefined>(undefined); // undefined = loading
   const [unread, setUnread] = useState(0);
-  const [simDay, setSimDay] = useState<number | null>(null);
+  const [clock, setClock] = useState<{ mode: "sim" | "real"; simDay: number | null } | null>(null);
 
   useEffect(() => {
     if (currentUserId() === null) {
@@ -34,7 +34,9 @@ export default function App() {
   useEffect(() => {
     if (!me) return;
     void api.get<NotificationsData>("/api/notifications").then((d) => setUnread(d.unreadCount));
-    void api.get<{ simDay: number }>("/api/dev/clock").then((d) => setSimDay(d.simDay));
+    void api
+      .get<{ mode: "sim" | "real"; simDay: number | null }>("/api/dev/clock")
+      .then((d) => setClock({ mode: d.mode, simDay: d.simDay }));
   }, [me, world]);
 
   if (me === undefined) return null;
@@ -63,7 +65,14 @@ export default function App() {
         <a className="logo" href="#/">
           First<em>Fan</em>
         </a>
-        {simDay !== null && <span className="daypill num">Day {simDay}</span>}
+        {clock?.mode === "sim" && clock.simDay !== null && (
+          <span className="daypill num">Day {clock.simDay}</span>
+        )}
+        {clock?.mode === "real" && (
+          <span className="daypill num" style={{ color: "var(--up)" }}>
+            ● live
+          </span>
+        )}
         <span className="spacer" />
         <a className="bell" href="#/inbox" aria-label={`Inbox, ${unread} unread`}>
           🔔

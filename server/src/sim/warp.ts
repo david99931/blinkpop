@@ -7,7 +7,7 @@
 
 import { getDb, inTransaction } from "../db/db.ts";
 import { getUniverse } from "./catalog.ts";
-import { setSimDay, simDay, simTimeForDay } from "./clock.ts";
+import { isRealTime, setSimDay, simDay, simTimeForDay } from "./clock.ts";
 import { settleDay } from "../jobs/settle.ts";
 
 export interface WarpResult {
@@ -18,6 +18,9 @@ export interface WarpResult {
 }
 
 export function warp(days: number): WarpResult {
+  if (isRealTime()) {
+    throw new Error("Time-warp is sim-only — the app is running against the real provider");
+  }
   if (!Number.isInteger(days) || days < 1 || days > 400) {
     throw new Error("days must be an integer between 1 and 400");
   }

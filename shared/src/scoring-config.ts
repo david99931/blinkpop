@@ -52,11 +52,17 @@ export const MILESTONES: readonly Milestone[] = [
 /** orderDecay(rank) = max(floor, base^(rank-1)); rank 1 = first picker. */
 export const ORDER_DECAY = { base: 0.9, floor: 0.25 } as const;
 
-/** Weekly growth bonus (§4.4): BOTH conditions required. */
-export const WEEKLY_GROWTH = {
-  minPercentWoW: 0.5, // ≥ 50% week-over-week
-  minAbsoluteGain: 2_500, // AND ≥ 2,500 plays gained that week
-  basePoints: 25,
+/**
+ * Continuous growth accrual (§4.3 v2) — the PRIMARY point source.
+ * points = plays gained × (pointsPer1k / 1000) × underdog(A) × decay × super,
+ * emitted per snapshot as the track grows (every couple of hours in live
+ * mode). Gains bank up until they're worth ≥ minEventPoints, so tiny tracks
+ * don't spray dust events. (Replaced the v1 weekly growth bonus — continuous
+ * accrual pays the same growth better.)
+ */
+export const GROWTH = {
+  pointsPer1k: 1,
+  minEventPoints: 1,
 } as const;
 
 /** Picks accrue points for this long, then expire (portfolio keeps them forever). */

@@ -22,6 +22,9 @@ export function WarpControl() {
     }
   };
 
+  // Real mode: time moves on its own; the warp control has no business here.
+  if (clock?.mode === "real") return null;
+
   return (
     <div className="warp num" title="Simulated time (dev)">
       <span>day {clock?.simDay ?? "…"}</span>

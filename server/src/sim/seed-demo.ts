@@ -9,7 +9,7 @@ import { makePick } from "../domain/picks.ts";
 import { follow } from "../domain/social.ts";
 import { createUser } from "../domain/users.ts";
 import { getUniverse } from "./catalog.ts";
-import { simDay } from "./clock.ts";
+import { isRealTime, simDay } from "./clock.ts";
 
 export interface SeedResult {
   created: boolean;
@@ -18,6 +18,9 @@ export interface SeedResult {
 }
 
 export async function seedDemo(): Promise<SeedResult> {
+  if (isRealTime()) {
+    throw new Error("Demo seeding is sim-only — switch FIRSTFAN_PROVIDER back to mock first");
+  }
   const db = getDb();
   const existing = db.prepare("SELECT COUNT(*) AS n FROM users").get() as { n: number };
   if (existing.n > 0) {

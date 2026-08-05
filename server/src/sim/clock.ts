@@ -1,10 +1,16 @@
 /**
- * The simulated clock. In Phase 1 EVERY timestamp the game writes (picks,
- * snapshots, score events) must come from simNow(), never new Date() —
- * otherwise time-warp breaks. Phase 2 swaps this for real time.
+ * The game clock. Sim mode (mock provider): every timestamp the game writes
+ * (picks, snapshots, score events) comes from the warp-driven sim clock.
+ * Real mode (FIRSTFAN_PROVIDER=soundcloud): simNow() is simply real time and
+ * the warp/simDay machinery is off-limits (guarded at the callers).
  */
 
 import { getDb } from "../db/db.ts";
+
+/** Read directly from env (not providers/) to avoid an import cycle. */
+export function isRealTime(): boolean {
+  return process.env.FIRSTFAN_PROVIDER === "soundcloud";
+}
 
 export const DAY_MS = 86_400_000;
 /** Day 0 of the simulated universe. */
@@ -33,8 +39,9 @@ export function setSimDay(day: number): void {
     .run(String(day));
 }
 
-/** Current sim time: midday of the current sim day. */
+/** Current game time: real time in real mode, else midday of the sim day. */
 export function simNow(): Date {
+  if (isRealTime()) return new Date();
   return new Date(SIM_EPOCH + simDay() * DAY_MS + SNAPSHOT_HOUR_MS);
 }
 

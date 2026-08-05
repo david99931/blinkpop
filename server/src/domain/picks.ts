@@ -2,7 +2,7 @@ import { PICK_WINDOW_DAYS, underdogTierFor, type Pick, type PickKind } from "@fi
 import type { DatabaseSync } from "node:sqlite";
 import { getDb, inTransaction } from "../db/db.ts";
 import { DAY_MS, simNow } from "../sim/clock.ts";
-import { getProvider } from "../providers/index.ts";
+import { getActiveProvider } from "../providers/index.ts";
 import { DomainError, getUserById } from "./users.ts";
 
 /** User-local calendar date (YYYY-MM-DD) for a moment in time. */
@@ -102,7 +102,7 @@ export async function makePick(
   const user = getUserById(userId);
   if (!user) throw new DomainError("unknown_user", "User not found");
 
-  const provider = getProvider("mock");
+  const provider = getActiveProvider();
   let details;
   try {
     details = await provider.getTrack(providerTrackId);

@@ -1,6 +1,17 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { migrate } from "./db/migrate.ts";
+
+// Load server/.env (SoundCloud credentials etc.); fine if it doesn't exist.
+try {
+  process.loadEnvFile(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", ".env"),
+  );
+} catch {
+  /* no .env yet — mock provider needs nothing */
+}
 import { trackRoutes } from "./routes/tracks.ts";
 import { devRoutes } from "./routes/dev.ts";
 import { userRoutes } from "./routes/users.ts";
@@ -9,6 +20,7 @@ import { socialRoutes } from "./routes/social.ts";
 import { leaderboardRoutes } from "./routes/leaderboard.ts";
 import { portfolioRoutes } from "./routes/portfolio.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
+import { startPollingJobs } from "./jobs/poll.ts";
 
 const app = Fastify({ logger: true });
 
@@ -28,3 +40,4 @@ await app.register(notificationRoutes);
 
 const port = Number(process.env.PORT ?? 3001);
 await app.listen({ port, host: "127.0.0.1" });
+startPollingJobs(app.log);
