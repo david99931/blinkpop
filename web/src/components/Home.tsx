@@ -1,6 +1,22 @@
 import { useEffect, useState } from "react";
-import { api, type MyPicks, type SearchResult } from "../api.ts";
+import { api, type MyPicks, type ScLikes, type SearchResult } from "../api.ts";
 import { Artwork, fmt, TierBadge, useWorldVersion } from "../util.tsx";
+
+function TrackRow({ r }: { r: SearchResult }) {
+  return (
+    <a className="trackrow" href={`#/track/${r.providerTrackId}`}>
+      <Artwork id={r.providerTrackId} title={r.title} url={r.artworkUrl} />
+      <div className="meta">
+        <div className="title">{r.title}</div>
+        <div className="artist">{r.artistName}</div>
+      </div>
+      <div style={{ textAlign: "right" }}>
+        <div className="plays num">{fmt(r.currentPlays)} plays</div>
+        {r.tier && <TierBadge label={r.tier.label} multiplier={r.tier.multiplier} />}
+      </div>
+    </a>
+  );
+}
 
 export function Home({ handle }: { handle: string }) {
   const world = useWorldVersion();
@@ -8,9 +24,11 @@ export function Home({ handle }: { handle: string }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [likes, setLikes] = useState<ScLikes | null>(null);
 
   useEffect(() => {
     void api.get<MyPicks>("/api/picks/me").then(setMine);
+    void api.get<ScLikes>("/api/me/soundcloud/likes").then(setLikes).catch(() => setLikes(null));
   }, [world]);
 
   useEffect(() => {
@@ -75,25 +93,26 @@ export function Home({ handle }: { handle: string }) {
           onChange={(e) => setQ(e.target.value)}
         />
         <p className="sub" style={{ margin: "8px 2px" }}>
-          {q ? (searching ? "Searching…" : `Results for “${q}”`) : "Undiscovered — smallest tracks first"}
+          {q ? (searching ? "Searching…" : `Results for “${q}”`) : "Search for tracks or artists"}
         </p>
         <div className="stack">
           {results.map((r) => (
-            <a key={r.providerTrackId} className="trackrow" href={`#/track/${r.providerTrackId}`}>
-              <Artwork id={r.providerTrackId} title={r.title} url={r.artworkUrl} />
-              <div className="meta">
-                <div className="title">{r.title}</div>
-                <div className="artist">{r.artistName}</div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div className="plays num">{fmt(r.currentPlays)} plays</div>
-                {r.tier && <TierBadge label={r.tier.label} multiplier={r.tier.multiplier} />}
-              </div>
-            </a>
+            <TrackRow key={r.providerTrackId} r={r} />
           ))}
-          {results.length === 0 && !searching && <div className="empty">No tracks found.</div>}
+          {results.length === 0 && !searching && q && <div className="empty">No tracks found.</div>}
         </div>
       </div>
+
+      {!q && likes?.connected && likes.tracks.length > 0 && (
+        <div className="section">
+          <h2 className="h2">☁️ From your SoundCloud likes</h2>
+          <div className="stack">
+            {likes.tracks.map((r) => (
+              <TrackRow key={r.providerTrackId} r={r} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

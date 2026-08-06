@@ -1,6 +1,58 @@
 import { useEffect, useState } from "react";
-import { api, type PortfolioData } from "../api.ts";
+import { api, type PortfolioData, type ScStatus } from "../api.ts";
 import { Artwork, fmt, fmtPts, useWorldVersion, worldChanged } from "../util.tsx";
+
+/** "Connect SoundCloud" card (own profile only) — unlocks likes/stats features. */
+function SoundCloudCard() {
+  const [status, setStatus] = useState<ScStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void api.get<ScStatus>("/api/me/soundcloud").then(setStatus);
+  }, []);
+
+  if (!status) return null;
+
+  const connect = async () => {
+    setBusy(true);
+    try {
+      const { url } = await api.get<{ url: string }>("/api/auth/soundcloud/connect");
+      window.location.href = url;
+    } catch {
+      setBusy(false);
+    }
+  };
+  const disconnect = async () => {
+    setBusy(true);
+    await api.delete("/api/me/soundcloud");
+    setStatus({ connected: false });
+    setBusy(false);
+  };
+
+  return (
+    <div className="card section">
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <div>
+          <b>☁️ SoundCloud</b>
+          <p className="sub" style={{ margin: 0 }}>
+            {status.connected
+              ? `Connected as ${status.username ?? "your account"}`
+              : "Connect to pick straight from your likes"}
+          </p>
+        </div>
+        {status.connected ? (
+          <button className="btn small danger" disabled={busy} onClick={() => void disconnect()}>
+            Disconnect
+          </button>
+        ) : (
+          <button className="btn small" disabled={busy} onClick={() => void connect()}>
+            Connect
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function PickCard({
   pick,
@@ -122,6 +174,7 @@ export function Portfolio({ handle, myHandle }: { handle: string; myHandle: stri
         <div className="v num">{fmtPts(data.totalPoints)}</div>
         <div className="k">total points</div>
       </div>
+      {isMe && <SoundCloudCard />}
       <div className="tiles" style={{ marginTop: 8 }}>
         <div className="tile">
           <div className="v num">🔥 {data.currentStreak}</div>

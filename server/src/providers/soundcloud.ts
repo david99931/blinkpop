@@ -150,6 +150,87 @@ class SoundCloudClient {
   }
 }
 
+// ── User-token OAuth (account linking) ──────────────────────────────────
+// Authorization-code flow with PKCE; tokens are per app-user and stored in
+// connected_accounts. Separate from the app's client-credentials token.
+
+export interface ScUserTokens {
+  accessToken: string;
+  refreshToken: string | null;
+  expiresAtIso: string;
+}
+
+async function tokenPost(body: URLSearchParams, config: SoundCloudConfig): Promise<ScUserTokens> {
+  body.set("client_id", config.clientId);
+  body.set("client_secret", config.clientSecret);
+  const res = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json; charset=utf-8",
+    },
+    body: body.toString(),
+  });
+  if (!res.ok) {
+    throw new Error(`SoundCloud user-token request failed: HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as {
+    access_token: string;
+    refresh_token?: string;
+    expires_in: number;
+  };
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token ?? null,
+    expiresAtIso: new Date(Date.now() + data.expires_in * 1000).toISOString(),
+  };
+}
+
+export function authorizeUrl(config: SoundCloudConfig, redirectUri: string, state: string, codeChallenge: string): string {
+  const q = new URLSearchParams({
+    client_id: config.clientId,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+  });
+  return `https://secure.soundcloud.com/authorize?${q}`;
+}
+
+export function exchangeAuthCode(
+  config: SoundCloudConfig,
+  code: string,
+  redirectUri: string,
+  codeVerifier: string,
+): Promise<ScUserTokens> {
+  return tokenPost(
+    new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+      code_verifier: codeVerifier,
+    }),
+    config,
+  );
+}
+
+export function refreshUserToken(config: SoundCloudConfig, refreshToken: string): Promise<ScUserTokens> {
+  return tokenPost(
+    new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken }),
+    config,
+  );
+}
+
+/** GET an API path with a USER's token (e.g. "/me", "/me/likes/tracks?limit=12"). */
+export async function scUserGet<T>(pathAndQuery: string, accessToken: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${pathAndQuery}`, {
+    headers: { Authorization: `OAuth ${accessToken}`, Accept: "application/json; charset=utf-8" },
+  });
+  if (!res.ok) throw new Error(`SoundCloud user API ${pathAndQuery} failed: HTTP ${res.status}`);
+  return (await res.json()) as T;
+}
+
 export class SoundCloudProvider implements MusicProvider {
   readonly name = "soundcloud" as const;
   private readonly client: SoundCloudClient;

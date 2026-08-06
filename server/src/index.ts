@@ -15,6 +15,7 @@ try {
 import { trackRoutes } from "./routes/tracks.ts";
 import { devRoutes } from "./routes/dev.ts";
 import { userRoutes } from "./routes/users.ts";
+import { authRoutes } from "./routes/auth.ts";
 import { pickRoutes } from "./routes/picks.ts";
 import { socialRoutes } from "./routes/social.ts";
 import { leaderboardRoutes } from "./routes/leaderboard.ts";
@@ -32,6 +33,7 @@ migrate();
 await app.register(trackRoutes);
 await app.register(devRoutes);
 await app.register(userRoutes);
+await app.register(authRoutes);
 await app.register(pickRoutes);
 await app.register(socialRoutes);
 await app.register(leaderboardRoutes);

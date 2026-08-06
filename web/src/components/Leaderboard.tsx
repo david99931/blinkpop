@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { api, currentUserId, type LeaderboardData } from "../api.ts";
+import { api, type LeaderboardData } from "../api.ts";
 import { fmtPts, useWorldVersion } from "../util.tsx";
 
-export function Leaderboard() {
+export function Leaderboard({ meId }: { meId: number }) {
   const world = useWorldVersion();
   const [scope, setScope] = useState<"global" | "friends">("global");
   const [period, setPeriod] = useState<"alltime" | "season">("alltime");
   const [data, setData] = useState<LeaderboardData | null>(null);
-  const me = currentUserId();
+  const me = meId;
 
   useEffect(() => {
     void api

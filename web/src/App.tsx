@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { api, currentUserId, setCurrentUserId, type NotificationsData, type UserInfo } from "./api.ts";
+import { api, currentToken, setToken, type NotificationsData, type UserInfo } from "./api.ts";
 import { useRoute, useWorldVersion } from "./util.tsx";
-import { Onboarding } from "./components/Onboarding.tsx";
+import { Auth } from "./components/Auth.tsx";
 import { Home } from "./components/Home.tsx";
 import { TrackPage } from "./components/TrackPage.tsx";
 import { Portfolio } from "./components/Portfolio.tsx";
@@ -18,7 +18,7 @@ export default function App() {
   const [clock, setClock] = useState<{ mode: "sim" | "real"; simDay: number | null } | null>(null);
 
   useEffect(() => {
-    if (currentUserId() === null) {
+    if (currentToken() === null) {
       setMe(null);
       return;
     }
@@ -26,7 +26,7 @@ export default function App() {
       .get<UserInfo>("/api/me")
       .then(setMe)
       .catch(() => {
-        setCurrentUserId(null); // stale id (e.g. DB reset)
+        setToken(null); // expired/invalid session
         setMe(null);
       });
   }, [world]);
@@ -43,7 +43,7 @@ export default function App() {
   if (me === null) {
     return (
       <div className="main">
-        <Onboarding />
+        <Auth />
       </div>
     );
   }
@@ -53,7 +53,7 @@ export default function App() {
     page === "track" && route[1] ? <TrackPage id={route[1]} />
     : page === "u" && route[1] ? <Portfolio handle={route[1]} myHandle={me.handle} />
     : page === "feed" ? <Feed />
-    : page === "board" ? <Leaderboard />
+    : page === "board" ? <Leaderboard meId={me.id} />
     : page === "inbox" ? <Inbox />
     : <Home handle={me.handle} />;
 
@@ -80,10 +80,12 @@ export default function App() {
         </a>
         <button
           className="bell"
-          title={`Signed in as @${me.handle} — click to switch`}
+          title={`Signed in as @${me.handle} — click to log out`}
           onClick={() => {
-            setCurrentUserId(null);
-            setMe(null);
+            void api.post("/api/auth/logout").finally(() => {
+              setToken(null);
+              setMe(null);
+            });
           }}
         >
           @

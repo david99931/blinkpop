@@ -1,16 +1,14 @@
-/** Typed fetch layer. Identity is the Phase 1 dev header (x-user-id). */
+/** Typed fetch layer. Identity is a bearer session token from /api/auth. */
 
-const USER_KEY = "ff_user_id";
+const TOKEN_KEY = "ff_token";
 
-export function currentUserId(): number | null {
-  const raw = localStorage.getItem(USER_KEY);
-  const id = raw === null ? NaN : Number(raw);
-  return Number.isInteger(id) && id > 0 ? id : null;
+export function currentToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
 }
 
-export function setCurrentUserId(id: number | null): void {
-  if (id === null) localStorage.removeItem(USER_KEY);
-  else localStorage.setItem(USER_KEY, String(id));
+export function setToken(token: string | null): void {
+  if (token === null) localStorage.removeItem(TOKEN_KEY);
+  else localStorage.setItem(TOKEN_KEY, token);
 }
 
 export class ApiError extends Error {
@@ -24,14 +22,16 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const userId = currentUserId();
+  const token = currentToken();
   const res = await fetch(path, {
     method,
     headers: {
       "content-type": "application/json",
-      ...(userId !== null ? { "x-user-id": String(userId) } : {}),
+      ...(token !== null ? { authorization: `Bearer ${token}` } : {}),
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    // Bodyless POST/DELETE still send "{}" — Fastify rejects an empty body
+    // when content-type says JSON.
+    body: method === "GET" ? undefined : JSON.stringify(body ?? {}),
   });
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
@@ -181,4 +181,21 @@ export interface ClockData {
   provider: string;
   simDay: number | null;
   simTime: string;
+}
+
+export interface AuthResult {
+  user: UserInfo;
+  token: string;
+}
+
+export interface ScStatus {
+  connected: boolean;
+  username?: string | null;
+  connectedAt?: string;
+}
+
+export interface ScLikes {
+  connected: boolean;
+  tracks: SearchResult[];
+  error?: string;
 }

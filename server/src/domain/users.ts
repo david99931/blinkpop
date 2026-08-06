@@ -38,6 +38,8 @@ export function createUser(input: {
   displayName?: string;
   email: string;
   tz?: string;
+  /** scrypt hash from domain/auth.ts; omit only for tests/seed accounts. */
+  passwordHash?: string;
 }): User {
   const handle = input.handle.toLowerCase().trim();
   if (!HANDLE_RE.test(handle)) {
@@ -49,7 +51,7 @@ export function createUser(input: {
     try {
       const res = db
         .prepare(
-          "INSERT INTO users (handle, display_name, email, tz, created_at) VALUES (?, ?, ?, ?, ?)",
+          "INSERT INTO users (handle, display_name, email, tz, created_at, password_hash) VALUES (?, ?, ?, ?, ?, ?)",
         )
         .run(
           handle,
@@ -57,6 +59,7 @@ export function createUser(input: {
           input.email.toLowerCase().trim(),
           input.tz ?? "UTC",
           simNow().toISOString(),
+          input.passwordHash ?? null,
         );
       const row = db
         .prepare("SELECT * FROM users WHERE id = ?")

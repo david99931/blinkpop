@@ -8,6 +8,7 @@ import { getDb } from "../db/db.ts";
 import { makePick } from "../domain/picks.ts";
 import { follow } from "../domain/social.ts";
 import { createUser } from "../domain/users.ts";
+import { hashPassword } from "../domain/auth.ts";
 import { getUniverse } from "./catalog.ts";
 import { isRealTime, simDay } from "./clock.ts";
 
@@ -34,9 +35,11 @@ export async function seedDemo(): Promise<SeedResult> {
     throw new Error("Seed the demo before warping (fresh DB expected). Delete firstfan.db to reset.");
   }
 
-  const ava = createUser({ handle: "ava", displayName: "Ava", email: "ava@demo.local" });
-  const ben = createUser({ handle: "ben", displayName: "Ben", email: "ben@demo.local" });
-  const cleo = createUser({ handle: "cleo", displayName: "Cleo", email: "cleo@demo.local" });
+  // Demo accounts all share the password "demo1234".
+  const demoHash = hashPassword("demo1234");
+  const ava = createUser({ handle: "ava", displayName: "Ava", email: "ava@demo.local", passwordHash: demoHash });
+  const ben = createUser({ handle: "ben", displayName: "Ben", email: "ben@demo.local", passwordHash: demoHash });
+  const cleo = createUser({ handle: "cleo", displayName: "Cleo", email: "cleo@demo.local", passwordHash: demoHash });
   for (const [a, b] of [
     [ava, ben], [ava, cleo], [ben, ava], [ben, cleo], [cleo, ava], [cleo, ben],
   ] as const) {
