@@ -7,6 +7,7 @@ import { TrackPage } from "./components/TrackPage.tsx";
 import { Portfolio } from "./components/Portfolio.tsx";
 import { Feed } from "./components/Feed.tsx";
 import { Leaderboard } from "./components/Leaderboard.tsx";
+import { Trending } from "./components/Trending.tsx";
 import { Inbox } from "./components/Inbox.tsx";
 import { WarpControl } from "./components/WarpControl.tsx";
 
@@ -53,6 +54,7 @@ export default function App() {
     page === "track" && route[1] ? <TrackPage id={route[1]} />
     : page === "u" && route[1] ? <Portfolio handle={route[1]} myHandle={me.handle} />
     : page === "feed" ? <Feed />
+    : page === "trends" ? <Trending />
     : page === "board" ? <Leaderboard meId={me.id} />
     : page === "inbox" ? <Inbox />
     : <Home handle={me.handle} />;
@@ -102,6 +104,9 @@ export default function App() {
         </a>
         <a className={tab("feed")} href="#/feed">
           <span className="ico">📡</span>Feed
+        </a>
+        <a className={tab("trends")} href="#/trends">
+          <span className="ico">📈</span>Trends
         </a>
         <a className={tab("board")} href="#/board">
           <span className="ico">🏆</span>Board

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type MyPicks, type TrackPageData } from "../api.ts";
 import { Artwork, fmt, fmtDate, fmtPts, TierBadge, useWorldVersion, worldChanged } from "../util.tsx";
-import { Sparkline } from "./Sparkline.tsx";
+import { StockChart } from "./StockChart.tsx";
 
 function FakePlayer() {
   const [playing, setPlaying] = useState(false);
@@ -111,8 +111,7 @@ export function TrackPage({ id }: { id: string }) {
 
       {data.sparkline.length > 1 && (
         <div className="section card">
-          <h2 className="h2">Plays over time</h2>
-          <Sparkline points={data.sparkline} />
+          <StockChart points={data.sparkline} />
         </div>
       )}
 

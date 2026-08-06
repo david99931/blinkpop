@@ -21,6 +21,7 @@ import { socialRoutes } from "./routes/social.ts";
 import { leaderboardRoutes } from "./routes/leaderboard.ts";
 import { portfolioRoutes } from "./routes/portfolio.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
+import { trendingRoutes } from "./routes/trending.ts";
 import { startPollingJobs } from "./jobs/poll.ts";
 
 const app = Fastify({ logger: true });
@@ -39,6 +40,7 @@ await app.register(socialRoutes);
 await app.register(leaderboardRoutes);
 await app.register(portfolioRoutes);
 await app.register(notificationRoutes);
+await app.register(trendingRoutes);
 
 const port = Number(process.env.PORT ?? 3001);
 await app.listen({ port, host: "127.0.0.1" });
