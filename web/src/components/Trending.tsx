@@ -47,15 +47,17 @@ export function Trending() {
               <Artwork id={t.providerTrackId} title={t.title} url={t.artworkUrl} />
               <div className="meta">
                 <div className="title">{t.title}</div>
-                <div className="artist">
+                <div className="artist" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {t.artistName}
-                  <span className="num">
-                    {" "}· {t.pickersRecent > 0 ? `${t.pickersRecent} pick${t.pickersRecent === 1 ? "" : "s"} this week` : `${t.pickersTotal} all-time`}
-                  </span>
+                </div>
+                <div className="sub num" style={{ fontSize: 11 }}>
+                  {t.pickersRecent > 0
+                    ? `🔥 ${t.pickersRecent} pick${t.pickersRecent === 1 ? "" : "s"} this week`
+                    : `${t.pickersTotal} picker${t.pickersTotal === 1 ? "" : "s"} all-time`}
                 </div>
               </div>
               <MiniSpark points={t.sparkline} up={up} />
-              <div style={{ textAlign: "right", minWidth: 64 }}>
+              <div style={{ textAlign: "right", minWidth: 56 }}>
                 <div className="plays num" style={{ fontWeight: 700, color: "var(--text)" }}>
                   {fmt(t.currentPlays)}
                 </div>

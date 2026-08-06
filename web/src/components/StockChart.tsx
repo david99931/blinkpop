@@ -28,8 +28,8 @@ function fmtWhen(iso: string): string {
 
 export function MiniSpark({ points, up }: { points: { plays: number }[]; up: boolean }) {
   if (points.length < 2) return null;
-  const W = 96;
-  const H = 34;
+  const W = 64;
+  const H = 32;
   const min = Math.min(...points.map((p) => p.plays));
   const max = Math.max(...points.map((p) => p.plays));
   const span = max - min || 1;
@@ -48,7 +48,13 @@ export function MiniSpark({ points, up }: { points: { plays: number }[]; up: boo
   );
 }
 
-export function StockChart({ points }: { points: SnapshotPoint[] }) {
+export interface ChartMarker {
+  /** ms timestamp of the moment (e.g. when you locked the pick) */
+  t: number;
+  label: string;
+}
+
+export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker?: ChartMarker }) {
   const all = useMemo(
     () =>
       points
@@ -96,6 +102,22 @@ export function StockChart({ points }: { points: SnapshotPoint[] }) {
     .map((d, i) => `${i === 0 ? "M" : "L"}${x(d.t).toFixed(1)},${y(d.plays).toFixed(1)}`)
     .join(" ");
   const area = `${path} L${x(t1).toFixed(1)},${H - PAD.b} L${x(t0).toFixed(1)},${H - PAD.b} Z`;
+
+  // Plays on the line at an arbitrary time (linear interpolation) — anchors
+  // the pick marker to the curve.
+  const playsAt = (t: number): number => {
+    if (t <= data[0]!.t) return data[0]!.plays;
+    for (let i = 1; i < data.length; i++) {
+      const a = data[i - 1]!;
+      const b = data[i]!;
+      if (t <= b.t) {
+        const f = (t - a.t) / (b.t - a.t || 1);
+        return a.plays + f * (b.plays - a.plays);
+      }
+    }
+    return data[data.length - 1]!.plays;
+  };
+  const markerVisible = marker !== undefined && marker.t >= t0 && marker.t <= t1;
 
   const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const rect = svgRef.current!.getBoundingClientRect();
@@ -154,6 +176,24 @@ export function StockChart({ points }: { points: SnapshotPoint[] }) {
           <path d={area} fill={dirColor} opacity="0.08" />
           <path d={path} fill="none" stroke={dirColor} strokeWidth="2" strokeLinejoin="round" />
           <circle cx={x(last.t)} cy={y(last.plays)} r="3.5" fill={dirColor} />
+          {markerVisible && (
+            <g>
+              <line
+                x1={x(marker.t)} x2={x(marker.t)} y1={PAD.t + 12} y2={H - PAD.b}
+                stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="2 3"
+              />
+              <circle
+                cx={x(marker.t)} cy={y(playsAt(marker.t))} r="5"
+                fill="var(--accent)" stroke="var(--surface)" strokeWidth="2"
+              />
+              <text
+                x={Math.min(x(marker.t) + 5, W - PAD.r - 60)} y={PAD.t + 9}
+                fontSize="10" fontWeight="700" fill="var(--accent)"
+              >
+                📍 {marker.label}
+              </text>
+            </g>
+          )}
           {hover !== null && (
             <g>
               <line

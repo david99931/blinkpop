@@ -100,11 +100,13 @@ export interface TrackPageData {
     baselinePlays: number | null;
     pickedAt: string;
     points: number;
+    kind: "daily" | "super";
   }[];
 }
 
 export interface PickView {
   id: number;
+  pickedAt: string;
   pickDate: string;
   pickRank: number;
   kind: "daily" | "super";

@@ -17,6 +17,7 @@ function trackPageExtras(providerTrackId: string): {
     baselinePlays: number | null;
     pickedAt: string;
     points: number;
+    kind: "daily" | "super";
   }[];
 } {
   const db = getDb();
@@ -34,7 +35,7 @@ function trackPageExtras(providerTrackId: string): {
   const pickers = (
     db
       .prepare(
-        `SELECT p.pick_rank, u.handle, u.display_name, base.plays AS baseline_plays, p.picked_at,
+        `SELECT p.pick_rank, p.kind, u.handle, u.display_name, base.plays AS baseline_plays, p.picked_at,
                 COALESCE((SELECT SUM(e.points) FROM score_events e WHERE e.pick_id = p.id), 0) AS points
            FROM picks p
            JOIN users u ON u.id = p.user_id
@@ -43,6 +44,7 @@ function trackPageExtras(providerTrackId: string): {
       )
       .all(track.id) as {
       pick_rank: number;
+      kind: "daily" | "super";
       handle: string;
       display_name: string;
       baseline_plays: number | null;
@@ -51,6 +53,7 @@ function trackPageExtras(providerTrackId: string): {
     }[]
   ).map((r) => ({
     rank: r.pick_rank,
+    kind: r.kind,
     handle: r.handle,
     displayName: r.display_name,
     baselinePlays: r.baseline_plays,

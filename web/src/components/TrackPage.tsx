@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type MyPicks, type TrackPageData } from "../api.ts";
 import { Artwork, fmt, fmtDate, fmtPts, TierBadge, useWorldVersion, worldChanged } from "../util.tsx";
-import { StockChart } from "./StockChart.tsx";
+import { StockChart, type ChartMarker } from "./StockChart.tsx";
 
 function FakePlayer() {
   const [playing, setPlaying] = useState(false);
@@ -41,7 +41,11 @@ export function TrackPage({ id }: { id: string }) {
   if (!data || !mine) return <div className="empty">Loading…</div>;
 
   const { track, tier } = data;
-  const alreadyPickedThis = mine.picks.some((p) => p.providerTrackId === id);
+  const myPick = mine.picks.find((p) => p.providerTrackId === id);
+  const alreadyPickedThis = myPick !== undefined;
+  const marker: ChartMarker | undefined = myPick
+    ? { t: Date.parse(myPick.pickedAt), label: `you · in at ${fmt(myPick.baselinePlays)}` }
+    : undefined;
   const canPick = (!mine.pickedToday || mine.superAvailable) && !alreadyPickedThis;
   const earlyBird =
     track.stats.plays !== null && track.stats.plays < 1000
@@ -111,7 +115,7 @@ export function TrackPage({ id }: { id: string }) {
 
       {data.sparkline.length > 1 && (
         <div className="section card">
-          <StockChart points={data.sparkline} />
+          <StockChart points={data.sparkline} marker={marker} />
         </div>
       )}
 
@@ -152,19 +156,43 @@ export function TrackPage({ id }: { id: string }) {
 
       {data.pickers.length > 0 && (
         <div className="section card" style={{ padding: 0 }}>
-          <h2 className="h2" style={{ padding: "14px 14px 4px" }}>OG board</h2>
-          {data.pickers.map((p) => (
-            <a key={p.rank} className="lb-row" href={`#/u/${p.handle}`}>
-              <span className="rank num">#{p.rank}</span>
-              <div className="who">
-                <div style={{ fontWeight: 700 }}>@{p.handle}</div>
-                <div className="sub num">
-                  in at {fmt(p.baselinePlays)} plays · {fmtDate(p.pickedAt)}
-                </div>
-              </div>
-              <span className="pts num">{fmtPts(p.points)} pts</span>
-            </a>
-          ))}
+          <h2 className="h2" style={{ padding: "14px 14px 0" }}>Early birds</h2>
+          <p className="sub" style={{ padding: "0 14px 6px", margin: 0 }}>
+            Who got in, where — ranked by points made.
+          </p>
+          {[...data.pickers]
+            .sort((a, b) => b.points - a.points)
+            .map((p, i) => {
+              const multiple =
+                p.baselinePlays !== null && p.baselinePlays > 0 && track.stats.plays !== null
+                  ? track.stats.plays / p.baselinePlays
+                  : null;
+              return (
+                <a key={p.rank} className="lb-row" href={`#/u/${p.handle}`}>
+                  <span className="rank num" style={i === 0 ? { color: "var(--gold)" } : undefined}>
+                    {i === 0 ? "👑" : i + 1}
+                  </span>
+                  <div className="who">
+                    <div style={{ fontWeight: 700 }}>
+                      @{p.handle}{" "}
+                      {p.baselinePlays !== null && p.baselinePlays < 1000 && <span title="early bird">🐦</span>}
+                      {p.kind === "super" && <span style={{ color: "var(--gold)" }} title="super pick">⚡</span>}
+                    </div>
+                    <div className="sub num">
+                      in at {fmt(p.baselinePlays)} · {fmtDate(p.pickedAt)} · OG #{p.rank}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div className="pts num">{fmtPts(p.points)} pts</div>
+                    {multiple !== null && multiple >= 1.01 && (
+                      <div className="delta-up num" style={{ fontSize: 12 }}>
+                        ▲ {multiple >= 10 ? `${fmt(Math.round(multiple))}×` : `+${Math.round((multiple - 1) * 100)}%`}
+                      </div>
+                    )}
+                  </div>
+                </a>
+              );
+            })}
         </div>
       )}
 

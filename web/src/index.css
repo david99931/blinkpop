@@ -75,7 +75,8 @@ a { color: inherit; text-decoration: none; }
   display: flex; align-items: center; justify-content: center; padding: 0 4px;
 }
 
-.main { flex: 1; padding: 16px; padding-bottom: 84px; }
+/* bottom padding clears the tab bar AND the floating sim warp pill */
+.main { flex: 1; padding: 16px; padding-bottom: 124px; }
 
 .tabbar {
   position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
