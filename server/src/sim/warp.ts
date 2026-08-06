@@ -6,8 +6,8 @@
  */
 
 import { getDb, inTransaction } from "../db/db.ts";
-import { getUniverse } from "./catalog.ts";
-import { isRealTime, setSimDay, simDay, simTimeForDay } from "./clock.ts";
+import { getUniverse, SNAPSHOTS_PER_DAY, statsAtSlot } from "./catalog.ts";
+import { DAY_MS, isRealTime, setSimDay, simDay, simTimeForDay } from "./clock.ts";
 import { settleDay } from "../jobs/settle.ts";
 
 export interface WarpResult {
@@ -36,13 +36,20 @@ export function warp(days: number): WarpResult {
       const insert = db.prepare(
         "INSERT INTO track_snapshots (track_id, plays, likes, reposts, captured_at) VALUES (?, ?, ?, ?, ?)",
       );
+      // Intraday slots: the last one lands on the day's canonical timestamp,
+      // earlier ones fill the preceding 24h so charts have texture.
+      const dayEndMs = simTimeForDay(day).getTime();
+      const slotMs = DAY_MS / SNAPSHOTS_PER_DAY;
       const capturedAt = simTimeForDay(day).toISOString();
       for (const t of tracked) {
         const sim = universe.get(t.provider_track_id);
         if (!sim) continue; // track from another seed's universe; leave it be
-        const s = sim.statsAt(day);
-        insert.run(t.id, s.plays, s.likes, s.reposts, capturedAt);
-        snapshotsInserted++;
+        for (let slot = 1; slot <= SNAPSHOTS_PER_DAY; slot++) {
+          const s = statsAtSlot(sim, day, slot);
+          const at = new Date(dayEndMs - (SNAPSHOTS_PER_DAY - slot) * slotMs).toISOString();
+          insert.run(t.id, s.plays, s.likes, s.reposts, at);
+          snapshotsInserted++;
+        }
       }
       // Scoring window (game rule 6): picks stop accruing after 180 days.
       db.prepare("UPDATE picks SET status = 'expired' WHERE status = 'active' AND expires_at < ?").run(

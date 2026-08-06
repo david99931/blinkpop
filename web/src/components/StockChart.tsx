@@ -26,6 +26,18 @@ function fmtWhen(iso: string): string {
   });
 }
 
+/** Axis tick label: time-of-day when the range is short, otherwise the date. */
+function fmtTick(ms: number, spanMs: number): string {
+  const d = new Date(ms);
+  if (spanMs <= 3 * 86_400_000) {
+    return d.toLocaleString("en-US", { hour: "numeric", timeZone: "UTC" });
+  }
+  if (spanMs <= 40 * 86_400_000) {
+    return d.toLocaleString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  }
+  return d.toLocaleString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
 export function MiniSpark({ points, up }: { points: { plays: number }[]; up: boolean }) {
   if (points.length < 2) return null;
   const W = 64;
@@ -79,16 +91,33 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
     return <p className="sub">Chart appears once the track has some tracked history.</p>;
   }
 
+  // Layout: price panel on top, its own baseline; volume panel below sharing
+  // the x-axis (a separate panel, NOT a second y-scale on the price marks).
   const W = 440;
-  const H = 150;
+  const H = 208;
   const PAD = { l: 6, r: 48, t: 8, b: 6 };
+  const PRICE_H = 116;
+  const AXIS_Y = PRICE_H + 14;
+  const VOL_LABEL_Y = AXIS_Y + 13;
+  const VOL_TOP = AXIS_Y + 17;
+  const VOL_H = H - VOL_TOP - 2;
   const t0 = data[0]!.t;
   const t1 = data[data.length - 1]!.t;
   const yMax = Math.max(...data.map((d) => d.plays));
   const yMin = Math.min(...data.map((d) => d.plays));
   const ySpan = yMax - yMin || 1;
   const x = (t: number) => PAD.l + ((t - t0) / (t1 - t0 || 1)) * (W - PAD.l - PAD.r);
-  const y = (v: number) => PAD.t + (1 - (v - yMin) / ySpan) * (H - PAD.t - PAD.b);
+  const y = (v: number) => PAD.t + (1 - (v - yMin) / ySpan) * (PRICE_H - PAD.t);
+
+  // Volume = plays added since the previous snapshot ("what happened in this
+  // interval"), the surge signal the price line alone hides.
+  const volumes = data.map((d, i) => (i === 0 ? 0 : Math.max(0, d.plays - data[i - 1]!.plays)));
+  const volMax = Math.max(1, ...volumes);
+  const barW = Math.max(1.5, (W - PAD.l - PAD.r) / Math.max(data.length, 1) - 1);
+
+  // ~4 evenly spaced time ticks across the visible range.
+  const tickCount = 4;
+  const ticks = Array.from({ length: tickCount }, (_, i) => t0 + ((t1 - t0) * i) / (tickCount - 1));
 
   const first = data[0]!;
   const last = data[data.length - 1]!;
@@ -101,7 +130,7 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
   const path = data
     .map((d, i) => `${i === 0 ? "M" : "L"}${x(d.t).toFixed(1)},${y(d.plays).toFixed(1)}`)
     .join(" ");
-  const area = `${path} L${x(t1).toFixed(1)},${H - PAD.b} L${x(t0).toFixed(1)},${H - PAD.b} Z`;
+  const area = `${path} L${x(t1).toFixed(1)},${PRICE_H} L${x(t0).toFixed(1)},${PRICE_H} Z`;
 
   // Plays on the line at an arbitrary time (linear interpolation) — anchors
   // the pick marker to the curve.
@@ -148,7 +177,10 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
               <> ({deltaPct >= 0 ? "+" : ""}{Math.abs(deltaPct) >= 100 ? Math.round(deltaPct) : deltaPct.toFixed(1)}%)</>
             )}
             <span style={{ color: "var(--text-3)", fontWeight: 400 }}>
-              {" "}· {hover !== null ? fmtWhen(focus.iso) : `plays, ${range === "All" ? "all time" : `past ${range}`}`}
+              {" "}·{" "}
+              {hover !== null
+                ? `${fmtWhen(focus.iso)}${volumes[hover]! > 0 ? ` · +${fmt(volumes[hover]!)} this interval` : ""}`
+                : `plays, ${range === "All" ? "all time" : `past ${range}`}`}
             </span>
           </div>
         </div>
@@ -176,10 +208,47 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
           <path d={area} fill={dirColor} opacity="0.08" />
           <path d={path} fill="none" stroke={dirColor} strokeWidth="2" strokeLinejoin="round" />
           <circle cx={x(last.t)} cy={y(last.plays)} r="3.5" fill={dirColor} />
+
+          {/* time axis, shared by both panels */}
+          <line x1={PAD.l} x2={W - PAD.r} y1={AXIS_Y} y2={AXIS_Y} stroke="var(--border)" strokeWidth="1" />
+          {ticks.map((t, i) => (
+            <text
+              key={t}
+              x={i === 0 ? PAD.l : i === ticks.length - 1 ? W - PAD.r : x(t)}
+              y={AXIS_Y - 4}
+              fontSize="9"
+              fill="var(--text-3)"
+              textAnchor={i === 0 ? "start" : i === ticks.length - 1 ? "end" : "middle"}
+            >
+              {fmtTick(t, t1 - t0)}
+            </text>
+          ))}
+
+          {/* volume panel: plays added per interval */}
+          <text x={PAD.l} y={VOL_LABEL_Y} fontSize="9" fill="var(--text-3)">
+            plays added
+          </text>
+          <text x={W - PAD.r} y={VOL_LABEL_Y} fontSize="9" fill="var(--text-3)" textAnchor="end">
+            peak {fmt(volMax)}
+          </text>
+          {data.map((d, i) =>
+            volumes[i]! > 0 ? (
+              <rect
+                key={d.t}
+                x={x(d.t) - barW / 2}
+                y={VOL_TOP + (1 - volumes[i]! / volMax) * VOL_H}
+                width={barW}
+                height={Math.max(1, (volumes[i]! / volMax) * VOL_H)}
+                fill={dirColor}
+                opacity={hover === i ? 0.95 : 0.4}
+                rx="1"
+              />
+            ) : null,
+          )}
           {markerVisible && (
             <g>
               <line
-                x1={x(marker.t)} x2={x(marker.t)} y1={PAD.t + 12} y2={H - PAD.b}
+                x1={x(marker.t)} x2={x(marker.t)} y1={PAD.t + 12} y2={PRICE_H}
                 stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="2 3"
               />
               <circle
@@ -187,17 +256,17 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
                 fill="var(--accent)" stroke="var(--surface)" strokeWidth="2"
               />
               <text
-                x={Math.min(x(marker.t) + 5, W - PAD.r - 60)} y={PAD.t + 9}
+                x={Math.min(x(marker.t) + 5, W - PAD.r - 62)} y={PAD.t + 9}
                 fontSize="10" fontWeight="700" fill="var(--accent)"
               >
-                📍 {marker.label}
+                ▼ {marker.label}
               </text>
             </g>
           )}
           {hover !== null && (
             <g>
               <line
-                x1={x(focus.t)} x2={x(focus.t)} y1={PAD.t} y2={H - PAD.b}
+                x1={x(focus.t)} x2={x(focus.t)} y1={PAD.t} y2={H - 2}
                 stroke="var(--text-3)" strokeWidth="1" strokeDasharray="3 3"
               />
               <circle cx={x(focus.t)} cy={y(focus.plays)} r="4.5" fill={dirColor} stroke="var(--surface)" strokeWidth="2" />

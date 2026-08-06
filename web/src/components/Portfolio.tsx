@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type PortfolioData, type ScStatus } from "../api.ts";
-import { Artwork, fmt, fmtPts, useWorldVersion, worldChanged } from "../util.tsx";
+import { Artwork, fmt, fmtPts, HoverBadge, useWorldVersion, worldChanged } from "../util.tsx";
 
 /** "Connect SoundCloud" card (own profile only) — unlocks likes/stats features. */
 function SoundCloudCard() {
@@ -93,9 +93,17 @@ function PickCard({
             {fmtPts(pick.points)} pts
           </div>
           {pick.kind === "super" && (
-            <span className="chip" style={{ color: "var(--gold)", borderColor: "var(--gold)", marginRight: 4 }}>
-              ⚡ 5×
-            </span>
+            <HoverBadge
+              icon="⚡"
+              text="5×"
+              kind="super"
+              tip={
+                <>
+                  <b>Super pick</b> — your weekly 5× swing. Growth, milestones and bonuses on
+                  this pick all pay five times over.
+                </>
+              }
+            />
           )}
           <span className="chip">OG #{pick.pickRank}</span>
         </div>
@@ -123,7 +131,18 @@ function PickCard({
             </span>
           ))}
           {pick.events.some((e) => e.type === "early_bird") && (
-            <span className="chip won">🐦 early bird</span>
+            <HoverBadge
+              icon="🐦"
+              text="early bird"
+              kind="early"
+              tipLeft
+              tip={
+                <>
+                  <b>Early bird bonus</b> — you were in under 1,000 plays and the track went on
+                  to cross a milestone. Paid once, scaled by your tier and pick order.
+                </>
+              }
+            />
           )}
         </div>
       )}

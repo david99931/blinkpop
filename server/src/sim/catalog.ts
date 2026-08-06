@@ -227,6 +227,53 @@ class StorySimTrack implements SimTrack {
   }
 }
 
+/**
+ * Snapshots per simulated day. Real mode polls every 2h; the sim emits 6
+ * (every 4 sim-hours) so charts have intraday texture instead of one smooth
+ * point per day.
+ */
+export const SNAPSHOTS_PER_DAY = 6;
+
+/**
+ * Plays at intraday slot `slot` (1..slots) of `day`. A day's gain is split
+ * across slots with uneven, deterministic weights — some slots crawl, some
+ * surge — so the line looks like a real ticker rather than a clean ramp.
+ * Monotonic by construction (weights are positive), and slot === slots
+ * always equals statsAt(day) exactly, so the daily series is unchanged.
+ */
+export function statsAtSlot(
+  track: SimTrack,
+  day: number,
+  slot: number,
+  slots: number = SNAPSHOTS_PER_DAY,
+  seed: string = DEFAULT_SEED,
+): SimStats {
+  if (slot >= slots || day <= 0) return track.statsAt(day);
+  const prev = track.statsAt(day - 1);
+  const end = track.statsAt(day);
+
+  // Weights are drawn from a stream keyed by (track, day) so they never
+  // disturb the daily increment stream.
+  const r = new Rng(`${seed}:intraday:${track.providerTrackId}:${day}`);
+  const weights: number[] = [];
+  for (let i = 0; i < slots; i++) {
+    // Wide spread + a ~20% chance of a surge slot: that contrast is what
+    // makes the line change slope and the volume panel spike.
+    weights.push(r.range(0.08, 1) * (r.chance(0.2) ? r.range(3, 6) : 1));
+  }
+  const total = weights.reduce((s, w) => s + w, 0);
+  let cum = 0;
+  for (let i = 0; i < slot; i++) cum += weights[i]!;
+  const f = cum / total;
+
+  const lerp = (a: number, b: number) => Math.round(a + (b - a) * f);
+  return {
+    plays: lerp(prev.plays, end.plays),
+    likes: lerp(prev.likes, end.likes),
+    reposts: lerp(prev.reposts, end.reposts),
+  };
+}
+
 const universeCache = new Map<string, Map<string, SimTrack>>();
 
 export function getUniverse(seed: string = DEFAULT_SEED): Map<string, SimTrack> {

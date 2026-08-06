@@ -9,6 +9,7 @@ const { getDb } = await import("../src/db/db.ts");
 const { createUser } = await import("../src/domain/users.ts");
 const { makePick, listPicksForUser, localDate } = await import("../src/domain/picks.ts");
 const { warp } = await import("../src/sim/warp.ts");
+const { SNAPSHOTS_PER_DAY } = await import("../src/sim/catalog.ts");
 const { simNow } = await import("../src/sim/clock.ts");
 
 let alice: { id: number };
@@ -56,12 +57,13 @@ describe("pick flow", () => {
       .prepare("SELECT COUNT(*) AS n FROM track_snapshots")
       .get() as { n: number };
     const result = warp(3);
-    // 2 tracked tracks × 3 days
-    expect(result.snapshotsInserted).toBe(6);
+    // 2 tracked tracks × 3 days × intraday slots
+    const expected = 2 * 3 * SNAPSHOTS_PER_DAY;
+    expect(result.snapshotsInserted).toBe(expected);
     const after = getDb()
       .prepare("SELECT COUNT(*) AS n FROM track_snapshots")
       .get() as { n: number };
-    expect(after.n - before.n).toBe(6);
+    expect(after.n - before.n).toBe(expected);
   });
 
   it("current plays in pick views move with the sim clock", () => {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type MyPicks, type TrackPageData } from "../api.ts";
-import { Artwork, fmt, fmtDate, fmtPts, TierBadge, useWorldVersion, worldChanged } from "../util.tsx";
+import { Artwork, fmt, fmtDate, fmtPts, HoverBadge, TierBadge, useWorldVersion, worldChanged } from "../util.tsx";
 import { StockChart, type ChartMarker } from "./StockChart.tsx";
 
 function FakePlayer() {
@@ -78,7 +78,20 @@ export function TrackPage({ id }: { id: string }) {
           <p className="sub">{track.artistName}</p>
           <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 6 }}>
             {tier && <TierBadge label={tier.label} multiplier={tier.multiplier} />}
-            {earlyBird && <span className="chip">🐦 {earlyBird} — early-bird bonus</span>}
+            {earlyBird && (
+              <HoverBadge
+                icon="🐦"
+                text={earlyBird}
+                kind="early"
+                tip={
+                  <>
+                    <b>Early bird</b> — this track is still under{" "}
+                    {earlyBird === "first 100" ? "100" : "1,000"} plays. Pick it now and you
+                    earn a bonus, paid out when it crosses its first milestone.
+                  </>
+                }
+              />
+            )}
           </div>
         </div>
       </div>
@@ -173,10 +186,34 @@ export function TrackPage({ id }: { id: string }) {
                     {i === 0 ? "👑" : i + 1}
                   </span>
                   <div className="who">
-                    <div style={{ fontWeight: 700 }}>
-                      @{p.handle}{" "}
-                      {p.baselinePlays !== null && p.baselinePlays < 1000 && <span title="early bird">🐦</span>}
-                      {p.kind === "super" && <span style={{ color: "var(--gold)" }} title="super pick">⚡</span>}
+                    <div className="row" style={{ gap: 5, fontWeight: 700 }}>
+                      @{p.handle}
+                      {p.baselinePlays !== null && p.baselinePlays < 1000 && (
+                        <HoverBadge
+                          icon="🐦"
+                          kind="early"
+                          tipLeft
+                          tip={
+                            <>
+                              <b>Early bird</b> — got in under {p.baselinePlays < 100 ? "100" : "1,000"} plays.
+                              Pays a bonus once the track crosses its first milestone.
+                            </>
+                          }
+                        />
+                      )}
+                      {p.kind === "super" && (
+                        <HoverBadge
+                          icon="⚡"
+                          kind="super"
+                          tipLeft
+                          tip={
+                            <>
+                              <b>Super pick</b> — spent their one weekly super pick here.
+                              Everything it earns is multiplied 5×.
+                            </>
+                          }
+                        />
+                      )}
                     </div>
                     <div className="sub num">
                       in at {fmt(p.baselinePlays)} · {fmtDate(p.pickedAt)} · OG #{p.rank}

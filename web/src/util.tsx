@@ -74,6 +74,36 @@ export function TierBadge({ label, multiplier }: { label: string; multiplier: nu
   );
 }
 
+/**
+ * A small badge that explains itself on hover/focus. Icons alone are a
+ * riddle; this keeps the row compact without hiding the meaning.
+ */
+export function HoverBadge({
+  icon,
+  text,
+  tip,
+  kind,
+  tipLeft,
+}: {
+  icon: string;
+  text?: string;
+  tip: React.ReactNode;
+  kind?: "early" | "super";
+  tipLeft?: boolean;
+}) {
+  return (
+    <span
+      className={`badge${kind ? ` ${kind}` : ""}${tipLeft ? " tip-left" : ""}`}
+      tabIndex={0}
+      role="note"
+    >
+      <span aria-hidden>{icon}</span>
+      {text}
+      <span className="tip">{tip}</span>
+    </span>
+  );
+}
+
 /** Minimal hash router: "#/track/mock-0001" → ["track", "mock-0001"]. */
 export function useRoute(): string[] {
   const parse = () => window.location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
