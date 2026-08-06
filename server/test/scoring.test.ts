@@ -71,16 +71,18 @@ describe("§4.6 ex.2 — late to the party", () => {
   });
 });
 
-describe("§4.6 ex.3 — the flatline (v2)", () => {
-  it("B=2,000 ending at 6,200 → a 21-pt drip, no milestones, no bonuses", () => {
+describe("§4.6 ex.3 — the flatline (v2.2)", () => {
+  it("B=2,000 crawling to 6,200 falls off its tier's pace and stops earning", () => {
     const events = scorePick(
       pick({ baselinePlays: 2_000 }),
       series([[30, 3_500], [60, 5_000], [90, 6_000], [180, 6_200]]),
     );
+    // Linear crawl vs a curve that compounds: it keeps pace for the first
+    // stretch only, then never again. No milestones, no bonuses, and single
+    // digits of growth — noise beside a real call's thousands.
     expect(events.filter((e) => e.type === "milestone")).toHaveLength(0);
     expect(events.filter((e) => e.type === "early_bird")).toHaveLength(0);
-    // 4,200 gained × 5× tier / 1000 = 21 — noise next to a real call's ~17k.
-    expect(growthPoints(events)).toBeCloseTo(21, 10);
+    expect(growthPoints(events)).toBeLessThan(10);
   });
 });
 
@@ -130,10 +132,10 @@ describe("milestone rules", () => {
   it("anything after the 180-day window pays nothing", () => {
     const events = scorePick(
       pick({ baselinePlays: 2_000 }),
-      series([[179, 9_000], [181, 500_000]]),
+      series([[20, 9_000], [181, 500_000]]),
     );
-    // day 181 is out of window: no milestone from the 500k jump, and growth
-    // only counts the in-window snapshot (9,000 − 2,000 = 7,000 → 35 pts).
+    // day 20 beats the curve (ideal ≈ 3.3k) → 7,000 gained × 5× = 35 pts.
+    // day 181 is out of window: its 500k jump pays nothing at all.
     expect(events.filter((e) => e.type === "milestone")).toHaveLength(0);
     expect(growthPoints(events)).toBeCloseTo(35, 10);
   });
@@ -160,24 +162,33 @@ describe("continuous growth accrual (§4.3 v2)", () => {
 
   it("banks tiny gains until they're worth a whole point (no dust events)", () => {
     const events = scorePick(
-      pick(), // B=600, 10× tier → 0.01 pt per play
-      series([[1, 620], [2, 680], [3, 750]]),
+      pick(), // B=600, 10× tier → 0.01 pt per play; curve wants 4%/day
+      series([[1, 630], [2, 660], [3, 750]]), // all above the curve
     );
     const growth = events.filter((e) => e.type === "growth");
-    // 0.2 then 0.8 banked, third snapshot releases the lot: 150 × 0.01 = 1.5
+    // 0.3 then 0.6 banked, third snapshot releases the lot: 150 × 0.01 = 1.5
     expect(growth).toHaveLength(1);
     expect(growth[0]!.occurredAt).toBe(iso(3));
     expect(growth[0]!.points).toBeCloseTo(1.5, 10);
   });
 
-  it("total telescopes to (final − baseline) regardless of snapshot cadence", () => {
-    const sparse = scorePick(pick(), series([[90, 500_600]]));
-    const dense = scorePick(
-      pick(),
-      series(Array.from({ length: 90 }, (_, i) => [i + 1, 600 + ((i + 1) * 500_000) / 90] as [number, number])),
+  it("an unbroken hot streak telescopes to (final − baseline)", () => {
+    // A single interval that beats pace pays the whole gain: 500,000 × 10×/1k
+    expect(growthPoints(scorePick(pick(), series([[90, 500_600]])))).toBeCloseTo(5_000, 5);
+  });
+
+  it("finer sampling judges pace more strictly, never more generously", () => {
+    // Linear growth looks fast early and slow later against a compounding
+    // benchmark, so dense sampling catches the cold stretch that a single
+    // end-to-end sample averages away. Cadence changes granularity, not
+    // fairness — and for a FIXED history the result is always identical.
+    const dense = series(
+      Array.from({ length: 90 }, (_, i) => [i + 1, 600 + ((i + 1) * 500_000) / 90] as [number, number]),
     );
-    expect(growthPoints(sparse)).toBeCloseTo(5_000, 5);
-    expect(growthPoints(dense)).toBeCloseTo(5_000, 5);
+    const denseTotal = growthPoints(scorePick(pick(), dense));
+    expect(denseTotal).toBeGreaterThan(0);
+    expect(denseTotal).toBeLessThan(5_000);
+    expect(growthPoints(scorePick(pick(), dense))).toBe(denseTotal);
   });
 
   it("growth accrual uses the artist tier", () => {

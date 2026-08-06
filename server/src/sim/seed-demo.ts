@@ -66,23 +66,30 @@ export async function seedDemo(): Promise<SeedResult> {
 
   warp(2); // day 2 — eli burns a SUPER on the dream while it's still tiny.
   await pick("eli", "story-dream", "super");
-  await pick("dana", "story-riser");
+  await pick("gus", "story-riser");
 
-  warp(3); // day 5 — faye gambles on a catalog moonshot.
+  warp(3); // day 5 — faye gambles on a moonshot, cleo... already has her dud.
   await pick("faye", "mock-0000");
 
-  warp(15); // day 20 — gus joins the dream mid-curve (~3k plays).
-  await pick("gus", "story-dream");
+  warp(2); // day 7 — spike-and-die tracks: one big week, then nothing.
+  await pick("gus", "mock-0060"); //   → the clearest stall-decay story
+  await pick("faye", "mock-0061"); //  a second cold pick
+
+  warp(13); // day 20 — dana joins the dream mid-curve (~3k plays).
+  await pick("dana", "story-dream");
 
   warp(54); // day 74 — hana chases the dream late (~310k plays, 0.3× tier).
   await pick("hana", "story-dream");
 
-  warp(16); // day 90 — fresh calls inside the trending window.
-  await pick("ava", "mock-0010");
-  await pick("ben", "mock-0060"); // a spike-and-die archetype — variety on Trends
-  await pick("dana", "mock-0001");
+  // Past day 90 the dream plateaus, so its early callers start bleeding too.
+  warp(32); // day 106
 
-  warp(4); // day 94 — let the fresh picks breathe.
+  // Fresh calls inside the trending window.
+  await pick("ava", "mock-0010");
+  await pick("ben", "mock-0002");
+  await pick("cleo", "mock-0011");
+
+  warp(4); // day 110 — let the fresh picks breathe.
 
   return {
     created: true,

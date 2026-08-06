@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError, type MyPicks, type TrackPageData } from "../api.ts";
 import { Artwork, fmt, fmtDate, fmtPts, HoverBadge, TierBadge, useWorldVersion, worldChanged } from "../util.tsx";
 import { StockChart, type ChartMarker } from "./StockChart.tsx";
+import { BEHIND_PACE_RATIO } from "@firstfan/shared";
 
 function FakePlayer() {
   const [playing, setPlaying] = useState(false);
@@ -128,7 +129,13 @@ export function TrackPage({ id }: { id: string }) {
 
       {data.sparkline.length > 1 && (
         <div className="section card">
-          <StockChart points={data.sparkline} marker={marker} />
+          <StockChart
+            points={data.sparkline}
+            marker={marker}
+            benchmark={
+              tier ? { idealDailyGrowth: tier.idealDailyGrowth, label: tier.label } : undefined
+            }
+          />
         </div>
       )}
 

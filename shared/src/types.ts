@@ -68,8 +68,11 @@ export interface Pick {
   status: PickStatus;
 }
 
-/** "weekly_growth" is legacy (v1 picks may hold old events); new accrual emits "growth". */
-export type ScoreEventType = "milestone" | "weekly_growth" | "early_bird" | "growth";
+/**
+ * "weekly_growth" is legacy (v1 picks may hold old events); new accrual emits
+ * "growth". "stall" events carry NEGATIVE points.
+ */
+export type ScoreEventType = "milestone" | "weekly_growth" | "early_bird" | "growth" | "stall";
 
 export interface ScoreEvent {
   id: number;
@@ -94,6 +97,7 @@ export type NotificationType =
   | "milestone_crossed"
   | "weekly_growth_awarded"
   | "early_bird_awarded"
+  | "pick_stalling"
   | "followed_user_picked"
   | "new_follower";
 

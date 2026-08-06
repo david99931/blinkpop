@@ -22,7 +22,7 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
       )
       .all(user.id) as {
       pick_id: number;
-      type: "milestone" | "weekly_growth";
+      type: "milestone" | "weekly_growth" | "early_bird" | "stall";
       milestone_value: number | null;
       points: number;
       computed_at: string;

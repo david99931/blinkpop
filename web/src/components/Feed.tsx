@@ -32,7 +32,10 @@ function FeedCard({ item }: { item: FeedItem }) {
             ) : (
               <>had a breakout week 📈</>
             )}{" "}
-            <span className="delta-up num">+{fmtPts(item.points ?? 0)} pts</span>
+            <span className={(item.points ?? 0) < 0 ? "delta-down num" : "delta-up num"}>
+              {(item.points ?? 0) < 0 ? "" : "+"}
+              {fmtPts(item.points ?? 0)} pts
+            </span>
           </p>
         )}
         <span className="sub">{item.artistName}</span>

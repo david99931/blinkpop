@@ -107,6 +107,20 @@ export function Settings({ me }: { me: UserInfo }) {
         </p>
 
         <div style={{ marginTop: 14 }}>
+          <div className="sub" style={{ marginBottom: 5 }}>
+            Default view —{" "}
+            {prefs.mode === "momentum"
+              ? "plays per day; falls when a track cools off"
+              : "running play count; only ever rises"}
+          </div>
+          <Choice
+            options={["total", "momentum"] as const}
+            value={prefs.mode}
+            onChange={(v) => setPrefs({ mode: v })}
+          />
+        </div>
+
+        <div style={{ marginTop: 14 }}>
           <div className="sub" style={{ marginBottom: 5 }}>Default range</div>
           <Choice
             options={RANGE_CHOICES}

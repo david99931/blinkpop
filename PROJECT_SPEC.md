@@ -18,6 +18,17 @@ Handoff document for Claude Code. Read this fully before writing code. Decisions
 > of hours), with milestones demoted to bonuses (§4.3/§4.4 rewritten). The v1
 > weekly growth bonus is retired (continuous accrual supersedes it). §4.6
 > examples updated.
+>
+> **v2.1 (2026-08-05):** picks can now **lose** points — stall decay. Charts
+> gained a **momentum view** (plays/day) that actually falls, since cumulative
+> plays can only ever rise. *(Superseded same day by v2.2 — see below.)*
+>
+> **v2.2 (2026-08-05):** stall decay is **removed**; picks never lose points
+> again. Instead each tier carries an **ideal growth curve**, and growth only
+> accrues over stretches where a track is keeping that pace (§4.3). Falling
+> behind costs the earnings you'd have made, nothing you already banked.
+> Charts colour **per segment** against that pace — green where the track is
+> beating it, red where it went cold.
 
 ---
 
@@ -112,7 +123,7 @@ of `A`.
 Artist identity: provider-scoped (mock: exact artist name; SoundCloud: the
 user id behind the track).
 
-### 4.3 Continuous growth accrual (primary point source, v2)
+### 4.3 Continuous growth accrual, gated on the ideal curve (primary source)
 
 Points accrue **proportionally to plays gained**, settled every couple of
 hours (each snapshot pass), so a portfolio moves through the day like a stock
@@ -122,14 +133,50 @@ ticker instead of jumping at milestones:
 points = plays gained × (1 / 1,000) × underdog(A) × orderDecay(rank) × super
 ```
 
+**…but only while the track is keeping its tier's expected pace (v2.2).**
+Every tier carries an `idealDailyGrowth` — the growth rate a typical track by
+an artist that size actually manages:
+
+```
+tier            ideal/day
+artist <1k        4.0%
+artist <10k       2.5%
+artist <50k       1.5%
+artist <250k      1.0%
+artist <1M        0.6%
+artist 1M+        0.3%
+```
+
+Smaller artists are held to a higher bar, because small tracks that are going
+anywhere grow fast in percentage terms. Recalibrate these from observed data
+with `server/scripts/calibrate-ideal.mjs` (use the **median** per tier — a
+mean is dragged up by moonshots until nothing can beat the benchmark).
+
 Mechanics:
-- Emitted as `growth` score events, one per snapshot that has banked enough
-  gain; tiny gains **bank** until they are worth ≥ 1 point (no dust events).
-  The awarded total always telescopes to `(current − baseline) / 1000 × mult`
-  regardless of how often settlement runs — pure and idempotent.
+- At each snapshot, compare **local pace** (plays gained per day since the
+  last award) against **expected pace** (`plays × idealDailyGrowth`). At or
+  above → the gain pays. Below → it pays nothing and the plays are
+  **forfeited**, so they cannot bank up and cash out on a later surge.
+- The comparison is deliberately *local*, not cumulative-since-pick: with a
+  cumulative test, one early spike keeps a track "ahead" forever and months
+  of stagnation still read as winning.
+- **Nothing is ever taken back.** Falling behind costs opportunity, not
+  banked points. There are no negative score events anywhere in the engine —
+  picks are immutable, so a user watching a decline cannot sell, and clawing
+  back earnings would be punishment without agency.
+- Emitted as `growth` score events; tiny gains **bank** until they are worth
+  ≥ 1 point (no dust events). Settlement stays idempotent via `dedupe_key`:
+  for a given snapshot history the result is always identical. Note that
+  sampling cadence affects *granularity* — denser snapshots judge pace more
+  strictly, never more generously.
 - Only accrues inside the 180-day live window.
 - Growth events are silent: no notifications, hidden from the feed (the drip
   would drown it). Milestone/early-bird moments carry the fanfare.
+
+UI: charts colour **each portion of the line** by that same comparison —
+green where the track is beating its tier's pace, red where it went cold —
+and the momentum view (plays/day) plots the expected-pace line as a dashed
+reference you can read the crossing against directly.
 
 `orderDecay(rank)` — rank is the user's position among all users who picked T (1 = first):
 
@@ -203,6 +250,14 @@ confirmation modal states that it does not consume the daily pick.
 
 Worked example: the §4.6 dream call made as a super pick = 5,400 × 5 =
 **27,000 milestone pts** (plus the early-bird bonus, also ×5).
+
+### 4.9 Stall decay — REMOVED in v2.2
+
+v2.1 briefly let picks bleed points while a track went cold. It is gone:
+picks can no longer lose points at all. The §4.3 ideal-curve gate replaces
+it — a cold track simply stops earning, which costs the player the upside
+without clawing back anything they banked. Migration `007_drop_stall.sql`
+purges the old negative events so historical totals match current rules.
 
 Scoring must be implemented as a **pure, deterministic function** of (pick, snapshot history, competing picks) → score events. No side effects inside scoring. The batch job feeds it data and persists the resulting events. Recomputing from scratch must always give the same result (idempotent settlement).
 

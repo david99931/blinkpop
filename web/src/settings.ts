@@ -9,17 +9,21 @@ import { useEffect, useState } from "react";
 
 export type RangeKey = "1W" | "1M" | "3M" | "All";
 export type IntervalKey = "auto" | "1h" | "4h" | "12h" | "1D" | "1W";
+/** "total" = cumulative plays (only rises). "momentum" = plays/day (rises AND falls). */
+export type ChartMode = "total" | "momentum";
 
 export interface ChartPrefs {
   defaultRange: RangeKey;
   interval: IntervalKey;
   showVolume: boolean;
+  mode: ChartMode;
 }
 
 export const DEFAULT_PREFS: ChartPrefs = {
   defaultRange: "All",
   interval: "auto",
   showVolume: true,
+  mode: "total",
 };
 
 /** Milliseconds per interval; "auto" is resolved from the visible span. */

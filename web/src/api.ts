@@ -63,6 +63,8 @@ export interface UserInfo {
 export interface Tier {
   multiplier: number;
   label: string;
+  /** Expected daily growth for this tier — the benchmark curve. */
+  idealDailyGrowth: number;
 }
 
 export interface SearchResult {
@@ -150,7 +152,7 @@ export interface FeedItem {
   baselinePlays?: number | null;
   tierLabel?: string | null;
   superPick?: boolean;
-  eventType?: "milestone" | "weekly_growth" | "early_bird";
+  eventType?: "milestone" | "weekly_growth" | "early_bird" | "stall";
   milestoneValue?: number | null;
   points?: number;
 }

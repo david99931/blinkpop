@@ -10,6 +10,17 @@ export interface UnderdogTier {
   multiplier: number;
   /** Short label for UI badges, e.g. "artist <1k — 10× tier". */
   label: string;
+  /**
+   * The tier's IDEAL growth curve: expected daily growth as a fraction of
+   * plays. This is the benchmark a pick is measured against — a track only
+   * earns while it is at or above `baseline × (1 + rate)^days` (§4.3).
+   *
+   * Smaller artists are expected to grow faster in percentage terms, so the
+   * bar is higher for them. These are v1 estimates — recalibrate from real
+   * observed data with `server/scripts/calibrate-ideal.mjs` once enough
+   * snapshot history exists.
+   */
+  idealDailyGrowth: number;
 }
 
 /**
@@ -20,15 +31,25 @@ export interface UnderdogTier {
  * land in the 10× tier. Ordered smallest tier first; first match wins.
  */
 export const UNDERDOG_TIERS: readonly UnderdogTier[] = [
-  { maxPlaysExclusive: 1_000, multiplier: 10.0, label: "artist <1k" },
-  { maxPlaysExclusive: 10_000, multiplier: 5.0, label: "artist <10k" },
-  { maxPlaysExclusive: 50_000, multiplier: 2.5, label: "artist <50k" },
-  { maxPlaysExclusive: 250_000, multiplier: 1.0, label: "artist <250k" },
-  { maxPlaysExclusive: 1_000_000, multiplier: 0.3, label: "artist <1M" },
+  { maxPlaysExclusive: 1_000, multiplier: 10.0, label: "artist <1k", idealDailyGrowth: 0.04 },
+  { maxPlaysExclusive: 10_000, multiplier: 5.0, label: "artist <10k", idealDailyGrowth: 0.025 },
+  { maxPlaysExclusive: 50_000, multiplier: 2.5, label: "artist <50k", idealDailyGrowth: 0.015 },
+  { maxPlaysExclusive: 250_000, multiplier: 1.0, label: "artist <250k", idealDailyGrowth: 0.01 },
+  { maxPlaysExclusive: 1_000_000, multiplier: 0.3, label: "artist <1M", idealDailyGrowth: 0.006 },
 ];
 
 /** Artist average at or above the last tier boundary. */
-export const UNDERDOG_FLOOR = { multiplier: 0.05, label: "artist 1M+" } as const;
+export const UNDERDOG_FLOOR = {
+  multiplier: 0.05,
+  label: "artist 1M+",
+  idealDailyGrowth: 0.003,
+} as const;
+
+/** Plays the tier's ideal curve expects `days` after a baseline of `basePlays`. */
+export function idealPlaysAt(basePlays: number, idealDailyGrowth: number, days: number): number {
+  if (days <= 0) return basePlays;
+  return basePlays * Math.pow(1 + idealDailyGrowth, days);
+}
 
 export interface Milestone {
   plays: number;
@@ -53,12 +74,15 @@ export const MILESTONES: readonly Milestone[] = [
 export const ORDER_DECAY = { base: 0.9, floor: 0.25 } as const;
 
 /**
- * Continuous growth accrual (§4.3 v2) — the PRIMARY point source.
+ * Continuous growth accrual (§4.3) — the PRIMARY point source.
  * points = plays gained × (pointsPer1k / 1000) × underdog(A) × decay × super,
  * emitted per snapshot as the track grows (every couple of hours in live
  * mode). Gains bank up until they're worth ≥ minEventPoints, so tiny tracks
- * don't spray dust events. (Replaced the v1 weekly growth bonus — continuous
- * accrual pays the same growth better.)
+ * don't spray dust events.
+ *
+ * v2.2: growth only accrues while the track is AT OR ABOVE its tier's ideal
+ * curve. Falling behind the benchmark costs you the earnings you'd have made
+ * — it never takes back points already banked.
  */
 export const GROWTH = {
   pointsPer1k: 1,
@@ -97,12 +121,21 @@ export function earlyBirdTierFor(
 export const SUPER_PICK = { multiplier: 5, perWeek: 1 } as const;
 
 /**
+ * How far below its ideal curve a track has to fall before the UI calls it
+ * "behind pace". Purely a display threshold — scoring gates strictly at the
+ * curve (below it, growth simply stops paying).
+ */
+export const BEHIND_PACE_RATIO = 0.9;
+
+/**
  * Tier lookup used by both the scoring engine and UI badges.
  * Input: the artist's average plays at pick time. Callers without artist
  * stats (legacy picks, providers with stats disabled) fall back to the
  * track's baseline plays — the pre-artist-tier behavior.
  */
-export function underdogTierFor(artistAvgPlays: number): { multiplier: number; label: string } {
+export function underdogTierFor(
+  artistAvgPlays: number,
+): { multiplier: number; label: string; idealDailyGrowth: number } {
   for (const t of UNDERDOG_TIERS) {
     if (artistAvgPlays < t.maxPlaysExclusive) return t;
   }

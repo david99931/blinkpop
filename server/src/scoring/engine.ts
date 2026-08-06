@@ -17,6 +17,8 @@ import {
   type ScoreEventType,
 } from "@firstfan/shared";
 
+const DAY_MS = 86_400_000;
+
 export interface ScoringPickInput {
   pickId: number;
   /** Plays at pick time (baseline snapshot). null = provider stats disabled → no scoring. */
@@ -76,8 +78,8 @@ export function scorePick(
     .sort((a, b) => a.ms - b.ms);
 
   const superMult = pick.kind === "super" ? SUPER_PICK.multiplier : 1;
-  const multiplier =
-    underdogTierFor(pick.artistAvgPlays ?? B).multiplier * orderDecay(pick.pickRank) * superMult;
+  const tier = underdogTierFor(pick.artistAvgPlays ?? B);
+  const multiplier = tier.multiplier * orderDecay(pick.pickRank) * superMult;
   const events: ScoreEventDraft[] = [];
 
   // ── Milestones (§4.3): first in-window snapshot at/above each milestone
@@ -111,18 +113,31 @@ export function scorePick(
     });
   }
 
-  // ── Continuous growth accrual (§4.3 v2, PRIMARY source): points
-  // proportional to plays gained, emitted per snapshot. Gains bank up from
-  // the last awarded snapshot until they're worth ≥ minEventPoints, so the
-  // award total telescopes to (last awarded plays − B) × rate × multiplier —
-  // identical no matter how often settlement runs (pure + idempotent).
-  const rate = GROWTH.pointsPer1k / 1000;
+  // ── Continuous growth accrual (§4.3, PRIMARY source): points proportional
+  // to plays gained — but ONLY over stretches where the track is growing at
+  // least as fast as its tier's ideal pace. Go cold and growth simply stops
+  // paying; nothing already banked is ever taken back.
+  //
+  // The comparison is LOCAL (pace right now vs expected pace at this size),
+  // not cumulative-since-pick: otherwise one early spike would keep a track
+  // "ahead" forever and a long stale stretch would still read as winning.
+  // Plays gained while behind pace are forfeited (the anchor advances), so
+  // they can't bank up and pay out on some later surge.
+  const pointRate = GROWTH.pointsPer1k / 1000;
   let anchorPlays = B;
+  let anchorMs = pickedMs;
   for (const s of snaps) {
-    const gained = s.plays - anchorPlays;
-    if (gained <= 0) continue;
-    const points = gained * rate * multiplier;
-    if (points < GROWTH.minEventPoints) continue;
+    const days = (s.ms - anchorMs) / DAY_MS;
+    if (days <= 0) continue;
+    const actualPerDay = (s.plays - anchorPlays) / days;
+    const idealPerDay = anchorPlays * tier.idealDailyGrowth;
+    if (actualPerDay < idealPerDay) {
+      anchorPlays = Math.max(anchorPlays, s.plays); // behind pace → forfeited
+      anchorMs = s.ms;
+      continue;
+    }
+    const points = (s.plays - anchorPlays) * pointRate * multiplier;
+    if (points < GROWTH.minEventPoints) continue; // bank until it's worth an event
     events.push({
       pickId: pick.pickId,
       type: "growth",
@@ -132,6 +147,7 @@ export function scorePick(
       occurredAt: s.iso,
     });
     anchorPlays = s.plays;
+    anchorMs = s.ms;
   }
 
   return events;

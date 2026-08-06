@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SnapshotPoint } from "../api.ts";
 import { fmt } from "../util.tsx";
-import { INTERVAL_MS, usePrefs, type IntervalKey, type RangeKey } from "../settings.ts";
+import { INTERVAL_MS, usePrefs, type ChartMode, type IntervalKey, type RangeKey } from "../settings.ts";
 
 /**
  * Robinhood-register plays chart: big number + signed delta header that
@@ -108,7 +108,22 @@ export interface ChartMarker {
   label: string;
 }
 
-export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker?: ChartMarker }) {
+/** The tier's expected growth curve, used as the benchmark line. */
+export interface Benchmark {
+  /** Expected daily growth as a fraction of plays. */
+  idealDailyGrowth: number;
+  label: string;
+}
+
+export function StockChart({
+  points,
+  marker,
+  benchmark,
+}: {
+  points: SnapshotPoint[];
+  marker?: ChartMarker;
+  benchmark?: Benchmark;
+}) {
   const prefs = usePrefs();
   const all = useMemo<P[]>(
     () =>
@@ -121,6 +136,7 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
 
   const [range, setRange] = useState<RangeKey>(prefs.defaultRange);
   const [interval, setIntervalKey] = useState<IntervalKey>(prefs.interval);
+  const [mode, setMode] = useState<ChartMode>(prefs.mode);
   /** Explicit zoom/pan window; null = follow the range preset. */
   const [view, setView] = useState<{ s: number; e: number } | null>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -132,6 +148,7 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
   // Follow preference changes made in Settings while a chart is open.
   useEffect(() => setRange(prefs.defaultRange), [prefs.defaultRange]);
   useEffect(() => setIntervalKey(prefs.interval), [prefs.interval]);
+  useEffect(() => setMode(prefs.mode), [prefs.mode]);
 
   const bounds = useMemo(() => {
     if (all.length === 0) return { s: 0, e: 1 };
@@ -170,8 +187,35 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
 
   const t0 = data[0]!.t;
   const t1 = data[data.length - 1]!.t;
-  const yMax = Math.max(...data.map((d) => d.plays));
-  const yMin = Math.min(...data.map((d) => d.plays));
+
+  // Momentum = plays gained per day over each interval. Unlike the running
+  // total (a counter that can only rise), this genuinely falls when a track
+  // goes cold — which is the whole point of showing it.
+  const rates = data.map((d, i) => {
+    if (i === 0) return 0;
+    const prev = data[i - 1]!;
+    const days = Math.max((d.t - prev.t) / DAY, 1 / 24);
+    return Math.max(0, (d.plays - prev.plays) / days);
+  });
+  if (rates.length > 1) rates[0] = rates[1]!; // avoid a phantom zero at the left edge
+
+  const values = mode === "momentum" ? rates : data.map((d) => d.plays);
+
+  /**
+   * The tier's expected pace at each point: a track this size "should" be
+   * gaining `plays × idealDailyGrowth` per day. Comparing LOCAL pace against
+   * it (rather than cumulative totals) is what makes a stale stretch read red
+   * even after a huge earlier spike — and it mirrors exactly what the scoring
+   * engine gates on.
+   */
+  const idealRates = benchmark
+    ? data.map((d, i) => (i === 0 ? 0 : data[i - 1]!.plays * benchmark.idealDailyGrowth))
+    : null;
+  if (idealRates && idealRates.length > 1) idealRates[0] = idealRates[1]!;
+  const beating = data.map((_, i) => (idealRates ? rates[i]! >= idealRates[i]! : true));
+
+  const yMax = Math.max(...values, ...(mode === "momentum" && idealRates ? idealRates : []));
+  const yMin = mode === "momentum" ? 0 : Math.min(...values);
   const ySpan = yMax - yMin || 1;
   const x = (t: number) => PAD.l + ((t - t0) / (t1 - t0 || 1)) * (W - PAD.l - PAD.r);
   const y = (v: number) => PAD.t + (1 - (v - yMin) / ySpan) * (PRICE_H - PAD.t);
@@ -183,25 +227,54 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
   const tickCount = 4;
   const ticks = Array.from({ length: tickCount }, (_, i) => t0 + ((t1 - t0) * i) / (tickCount - 1));
 
+  const lastIdx = data.length - 1;
+  const focusIdx = hover !== null && hover <= lastIdx ? hover : lastIdx;
   const first = data[0]!;
-  const last = data[data.length - 1]!;
-  const focus = hover !== null ? data[hover] ?? last : last;
-  const delta = focus.plays - first.plays;
-  const deltaPct = first.plays > 0 ? (delta / first.plays) * 100 : null;
-  const up = delta >= 0;
+  const last = data[lastIdx]!;
+  const focus = data[focusIdx]!;
+
+  const firstValue = values[0]!;
+  const focusValue = values[focusIdx]!;
+  const delta = focusValue - firstValue;
+  const deltaPct = firstValue > 0 ? (delta / firstValue) * 100 : null;
+
+  /** Is the track currently at or above its tier's expected pace? */
+  const onPace = beating[lastIdx] ?? true;
+  const up = benchmark ? onPace : delta >= 0;
   const dirColor = up ? "var(--up)" : "var(--down)";
 
-  const path = data.map((d, i) => `${i === 0 ? "M" : "L"}${x(d.t).toFixed(1)},${y(d.plays).toFixed(1)}`).join(" ");
-  const area = `${path} L${x(t1).toFixed(1)},${PRICE_H} L${x(t0).toFixed(1)},${PRICE_H} Z`;
+  const pt = (i: number) => `${x(data[i]!.t).toFixed(1)},${y(values[i]!).toFixed(1)}`;
+  const fullPath = data.map((_, i) => `${i === 0 ? "M" : "L"}${pt(i)}`).join(" ");
 
-  const playsAt = (t: number): number => {
-    if (t <= data[0]!.t) return data[0]!.plays;
+  /**
+   * Split the line into runs that are above vs below the benchmark, so each
+   * PORTION carries its own color instead of the whole line taking one.
+   * Runs overlap by a point so there are no gaps at the crossings.
+   */
+  const segments: { above: boolean; d: string }[] = [];
+  if (idealRates && data.length > 1) {
+    // Each drawn segment spans points [i-1, i] and takes the state at i.
+    const segAbove = data.slice(1).map((_, i) => beating[i + 1]!);
+    let run = 0;
+    for (let i = 0; i < segAbove.length; i++) {
+      if (i === segAbove.length - 1 || segAbove[i] !== segAbove[i + 1]) {
+        const pts: string[] = [];
+        for (let k = run; k <= i + 1; k++) pts.push(`${k === run ? "M" : "L"}${pt(k)}`);
+        segments.push({ above: segAbove[i]!, d: pts.join(" ") });
+        run = i + 1; // next run reuses the crossing point → no gap
+      }
+    }
+  }
+  const area = `${fullPath} L${x(t1).toFixed(1)},${PRICE_H} L${x(t0).toFixed(1)},${PRICE_H} Z`;
+
+  const valueAt = (t: number): number => {
+    if (t <= data[0]!.t) return values[0]!;
     for (let i = 1; i < data.length; i++) {
       const a = data[i - 1]!;
       const b = data[i]!;
-      if (t <= b.t) return a.plays + ((t - a.t) / (b.t - a.t || 1)) * (b.plays - a.plays);
+      if (t <= b.t) return values[i - 1]! + ((t - a.t) / (b.t - a.t || 1)) * (values[i]! - values[i - 1]!);
     }
-    return data[data.length - 1]!.plays;
+    return values[values.length - 1]!;
   };
   const markerVisible = marker !== undefined && marker.t >= t0 && marker.t <= t1;
 
@@ -291,23 +364,34 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
       <div className="row" style={{ alignItems: "flex-end", marginBottom: 6 }}>
         <div style={{ minWidth: 0 }}>
           <div className="num" style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.1 }}>
-            {fmt(focus.plays)}
+            {fmt(Math.round(focusValue))}
+            {mode === "momentum" && (
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-3)" }}> /day</span>
+            )}
           </div>
           <div className="num" style={{ fontSize: 13, color: dirColor, fontWeight: 700 }}>
-            {up ? "▲" : "▼"} {delta >= 0 ? "+" : "−"}
-            {fmt(Math.abs(delta))}
-            {deltaPct !== null && (
+            {delta >= 0 ? "▲" : "▼"} {delta >= 0 ? "+" : "−"}
+            {fmt(Math.round(Math.abs(delta)))}
+            {deltaPct !== null && Math.abs(deltaPct) < 100000 && (
               <> ({deltaPct >= 0 ? "+" : ""}{Math.abs(deltaPct) >= 100 ? Math.round(deltaPct) : deltaPct.toFixed(1)}%)</>
             )}
             <span style={{ color: "var(--text-3)", fontWeight: 400 }}>
               {" "}·{" "}
               {hover !== null
-                ? `${fmtWhen(focus.iso)}${volumes[hover] ? ` · +${fmt(volumes[hover]!)}` : ""}`
-                : zoomed
-                  ? "plays, zoomed"
-                  : `plays, ${range === "All" ? "all time" : `past ${range}`}`}
+                ? `${fmtWhen(focus.iso)}${volumes[focusIdx] ? ` · +${fmt(volumes[focusIdx]!)}` : ""}`
+                : `${mode === "momentum" ? "pace" : "plays"}, ${zoomed ? "zoomed" : range === "All" ? "all time" : `past ${range}`}`}
             </span>
           </div>
+          {benchmark && (
+            <div
+              className="num"
+              style={{ fontSize: 12, color: onPace ? "var(--up)" : "var(--down)", fontWeight: 700, marginTop: 2 }}
+            >
+              {onPace
+                ? `▲ beating ${benchmark.label} pace — earning`
+                : `▼ behind ${benchmark.label} pace — not earning`}
+            </div>
+          )}
         </div>
         <span className="spacer" />
         {zoomed && (
@@ -333,7 +417,11 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
           }}
           onDoubleClick={() => setView(null)}
           role="img"
-          aria-label={`Plays over time, ${fmt(first.plays)} to ${fmt(last.plays)}`}
+          aria-label={
+            `${mode === "momentum" ? "Plays per day" : "Total plays"} over time, ` +
+            `${fmt(Math.round(firstValue))} to ${fmt(Math.round(values[lastIdx]!))}` +
+            (benchmark ? `, currently ${onPace ? "above" : "below"} expected pace` : "")
+          }
         >
           {[yMin, yMax].map((v) => (
             <g key={v}>
@@ -343,9 +431,45 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
               </text>
             </g>
           ))}
-          <path d={area} fill={dirColor} opacity="0.08" />
-          <path d={path} fill="none" stroke={dirColor} strokeWidth="2" strokeLinejoin="round" />
-          <circle cx={x(last.t)} cy={y(last.plays)} r="3.5" fill={dirColor} />
+          <path d={area} fill={dirColor} opacity="0.07" />
+          {/* the tier's expected pace — the line the track is judged against.
+              Only drawn in momentum view, where it's directly comparable to
+              the plotted series (same units: plays/day). */}
+          {mode === "momentum" && idealRates && (
+            <path
+              d={idealRates
+                .map((v, i) => `${i === 0 ? "M" : "L"}${x(data[i]!.t).toFixed(1)},${y(v).toFixed(1)}`)
+                .join(" ")}
+              fill="none"
+              stroke="var(--text-3)"
+              strokeWidth="1.5"
+              strokeDasharray="4 4"
+              opacity="0.85"
+            />
+          )}
+          {mode === "momentum" && idealRates && (
+            <text
+              x={W - PAD.r} y={PAD.t + 8} fontSize="9" fill="var(--text-3)" textAnchor="end"
+            >
+              ╌ expected pace
+            </text>
+          )}
+          {segments.length > 0 ? (
+            segments.map((s, i) => (
+              <path
+                key={i}
+                d={s.d}
+                fill="none"
+                stroke={s.above ? "var(--up)" : "var(--down)"}
+                strokeWidth="2"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+            ))
+          ) : (
+            <path d={fullPath} fill="none" stroke={dirColor} strokeWidth="2" strokeLinejoin="round" />
+          )}
+          <circle cx={x(last.t)} cy={y(values[lastIdx]!)} r="3.5" fill={dirColor} />
 
           <line x1={PAD.l} x2={W - PAD.r} y1={AXIS_Y} y2={AXIS_Y} stroke="var(--border)" strokeWidth="1" />
           {ticks.map((t, i) => (
@@ -377,7 +501,7 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
                     y={VOL_TOP + (1 - volumes[i]! / volMax) * VOL_H}
                     width={barW}
                     height={Math.max(1, (volumes[i]! / volMax) * VOL_H)}
-                    fill={dirColor}
+                    fill={beating[i] ? "var(--up)" : "var(--down)"}
                     opacity={hover === i ? 0.95 : 0.4}
                     rx="1"
                   />
@@ -393,7 +517,7 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
                 stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="2 3"
               />
               <circle
-                cx={x(marker.t)} cy={y(playsAt(marker.t))} r="5"
+                cx={x(marker.t)} cy={y(valueAt(marker.t))} r="5"
                 fill="var(--accent)" stroke="var(--surface)" strokeWidth="2"
               />
               <text
@@ -410,7 +534,7 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
                 x1={x(focus.t)} x2={x(focus.t)} y1={PAD.t} y2={H - 2}
                 stroke="var(--text-3)" strokeWidth="1" strokeDasharray="3 3"
               />
-              <circle cx={x(focus.t)} cy={y(focus.plays)} r="4.5" fill={dirColor} stroke="var(--surface)" strokeWidth="2" />
+              <circle cx={x(focus.t)} cy={y(focusValue)} r="4.5" fill={dirColor} stroke="var(--surface)" strokeWidth="2" />
             </g>
           )}
         </svg>
@@ -427,6 +551,19 @@ export function StockChart({ points, marker }: { points: SnapshotPoint[]; marker
             }}
           >
             {r.label}
+          </button>
+        ))}
+      </div>
+      <div className="row" style={{ gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
+        <span className="sub" style={{ fontSize: 11 }}>View</span>
+        {(["total", "momentum"] as ChartMode[]).map((m) => (
+          <button
+            key={m}
+            className={`chip${mode === m ? " won" : ""}`}
+            style={{ cursor: "pointer", background: mode === m ? undefined : "transparent" }}
+            onClick={() => setMode(m)}
+          >
+            {m === "total" ? "total plays" : "momentum"}
           </button>
         ))}
       </div>

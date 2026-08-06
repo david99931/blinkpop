@@ -18,7 +18,7 @@ export interface FeedItem {
   tierLabel?: string | null;
   superPick?: boolean;
   // score cards
-  eventType?: "milestone" | "weekly_growth" | "early_bird";
+  eventType?: "milestone" | "weekly_growth" | "early_bird" | "stall";
   milestoneValue?: number | null;
   points?: number;
 }
@@ -64,7 +64,7 @@ export function buildFeed(userId: number, limit = 50): FeedItem[] {
     )
     .all(...ids, limit) as {
     at: string;
-    event_type: "milestone" | "weekly_growth" | "early_bird";
+    event_type: "milestone" | "weekly_growth" | "early_bird" | "stall";
     milestone_value: number | null;
     points: number;
     handle: string;
