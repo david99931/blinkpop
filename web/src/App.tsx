@@ -9,6 +9,7 @@ import { Feed } from "./components/Feed.tsx";
 import { Leaderboard } from "./components/Leaderboard.tsx";
 import { Trending } from "./components/Trending.tsx";
 import { Inbox } from "./components/Inbox.tsx";
+import { Settings } from "./components/Settings.tsx";
 import { WarpControl } from "./components/WarpControl.tsx";
 
 export default function App() {
@@ -57,6 +58,7 @@ export default function App() {
     : page === "trends" ? <Trending />
     : page === "board" ? <Leaderboard meId={me.id} />
     : page === "inbox" ? <Inbox />
+    : page === "settings" ? <Settings me={me} />
     : <Home handle={me.handle} />;
 
   const tab = (p: string) => (page === p ? "active" : "");
@@ -80,18 +82,9 @@ export default function App() {
           🔔
           {unread > 0 && <span className="badge num">{unread > 9 ? "9+" : unread}</span>}
         </a>
-        <button
-          className="bell"
-          title={`Signed in as @${me.handle} — click to log out`}
-          onClick={() => {
-            void api.post("/api/auth/logout").finally(() => {
-              setToken(null);
-              setMe(null);
-            });
-          }}
-        >
-          @
-        </button>
+        <a className="bell" href="#/settings" title={`@${me.handle} — settings`} aria-label="Settings">
+          ⚙
+        </a>
       </header>
 
       <main className="main">{view}</main>
