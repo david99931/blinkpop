@@ -86,23 +86,35 @@ substitutes for that. Rough timeline:
 - ~60–90 days — enough to fix Moonshot (currently set at 8 doublings, which the
   sample says no real track reaches — see the note in `scoring-config.ts`)
 
-### Scheduling the daily poll
+### The daily poll is scheduled
+
+Windows Task Scheduler task **`blinkpop corpus`**, created 2026-08-10. It runs
+`npm run corpus:poll` daily at 3am. You don't run anything by hand.
+
+Settings that matter:
+
+- **Start when available** — the PC does *not* have to be on at 3am. If it was
+  off, the poll runs at next logon (Windows waits ~10 min first).
+- **Wake to run** — wakes from sleep rather than skipping.
+- **Only if network available**, and up to 3 retries 30 min apart.
+- Runs as `david`, interactive — so it needs you logged in, not just booted.
+
+Catch-up covers *one* missed run, not one per missed day. That's correct
+anyway: a missed day's data is gone for good, since SoundCloud can't report
+what a track's play count was last Tuesday.
+
+Useful commands:
 
 ```powershell
-schtasks /create /tn "blinkpop corpus" /tr "cmd /c cd /d C:\Users\david\Downloads\TGS && npm run corpus:poll" /sc daily /st 03:00
+schtasks /query /tn "blinkpop corpus" /fo list   # next/last run, last result
+schtasks /run   /tn "blinkpop corpus"            # poll now
+schtasks /delete /tn "blinkpop corpus" /f        # remove it
+Get-Content corpus-poll.log -Tail 20             # what the last run did
 ```
 
-Then open Task Scheduler (`taskschd.msc`), find the task, and set two things
-the command line can't:
-
-- **Settings → Run task as soon as possible after a scheduled start is missed.**
-  This is the important one. It means the PC does *not* have to be on at 3am —
-  if it was off, the poll runs next time you boot.
-- **Conditions → Wake the computer to run this task**, if you'd rather it wake
-  from sleep and poll on schedule.
-
-Verify it works: `schtasks /run /tn "blinkpop corpus"`, then `npm run corpus:report`
-and check the snapshot count went up.
+`Last Result: 0` means success. The task definition is checked in at
+`server/scripts/corpus-task.xml` — re-register with
+`schtasks /create /xml server\scripts\corpus-task.xml /tn "blinkpop corpus"`.
 
 ### Do you have to leave the PC on?
 

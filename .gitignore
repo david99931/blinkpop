@@ -7,3 +7,4 @@ dist/
 .env
 .env.*
 firstfan-corpus.db*
+*.log
