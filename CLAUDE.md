@@ -12,6 +12,15 @@ The CLAUDE.md one directory up (`Downloads/CLAUDE.md`) belongs to a different pr
 - Provider switch: `FIRSTFAN_PROVIDER` in `server/.env` — `soundcloud` (real API, real time, polling jobs, DB `firstfan-live.db`) or unset/`mock` (simulator + time-warp, DB `firstfan.db`). Each mode has its own DB file; worlds never mix.
 - SoundCloud credentials live ONLY in `server/.env` (gitignored). Field reality check: likes are `favoritings_count` on track objects, not `likes_count` — verified live 2026-08-05; see `server/scripts/check-soundcloud.mjs`.
 
+## Calibration corpus (badge thresholds)
+SoundCloud exposes only a track's CURRENT play count — there is no history endpoint, so trajectory shape can't be measured from a single call at any sample size. `server/scripts/corpus.ts` keeps a standing sample of real tracks in its own DB (`firstfan-corpus.db`, gitignored) and polls it daily to accumulate the history badge thresholds need.
+- `npm run corpus:seed` — discover tracks (genre search **plus artist-catalogue walking**, which is the only way to reach small tracks; search alone is all big ones)
+- `npm run corpus:poll` — snapshot the whole corpus; batched 50/call, so 2,000 tracks ≈ 40 API calls
+- `npm run corpus:report` — distributions + badge mix using the real classifier
+Seeded 2,000 tracks on 2026-08-10. **Poll daily** (Task Scheduler); useful signal ~14 days, real calibration ~60–90.
+
+Known gap: current badge thresholds are tuned to the SIMULATOR, which is far more explosive than reality — 502 sampled live tracks projected max 2.78 doublings/180d where Moonshot asks 8. See the calibration note on `AFFINITY.moonshotDoublings`. Badges are upgrade-only, so thresholds can safely be LOOSENED later but never tightened without breaking the never-revoke promise.
+
 ## Commands (run from repo root)
 - `npm run dev` — API server (port 3001)
 - `npm run dev:web` — Vite dev server (port 5173, proxies `/api` → 3001)

@@ -11,9 +11,12 @@
  */
 
 import {
+  AFFINITY,
+  BADGE_META,
   BADGE_ORDER,
   BADGE_RULES,
   BADGE_SCORING,
+  HYBRID_NAMES,
   ORDER_DECAY,
   SUPER_PICK,
   underdogTierFor,
@@ -99,6 +102,94 @@ export function trajectorySignals(
   };
 }
 
+const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+/** Log-scaled 0→1 between two anchors, so magnitudes spanning decades behave. */
+const logScale = (v: number, floor: number, full: number) =>
+  clamp01(Math.log10(1 + Math.max(0, v) / floor) / Math.log10(1 + full / floor));
+
+export type Affinities = Record<Badge, number>;
+
+/**
+ * How strongly this run resembles each archetype, 0–1. Unlike the v4
+ * first-match rules, every archetype is scored, so a run that is partly two
+ * things can be recognised as exactly that.
+ */
+/**
+ * Ramp up to `full`, hold, then fade out by `zero`. Without the fade the
+ * archetypes nest inside each other — every moonshot is also a "perfect
+ * riser", every juggernaut a "perfect flatline" — and nothing is ever pure.
+ * The fade is what makes them mutually exclusive.
+ */
+function band(v: number, full: number, fadeFrom: number, zero: number): number {
+  if (v <= 0) return 0;
+  const rise = clamp01(v / full);
+  const fall = v <= fadeFrom ? 1 : clamp01(1 - (v - fadeFrom) / (zero - fadeFrom));
+  return rise * fall;
+}
+
+export function affinities(s: TrajectorySignals): Affinities {
+  const A = AFFINITY;
+  return {
+    moonshot: clamp01(s.doublings / A.moonshotDoublings),
+    // big, added real reach — and specifically did NOT multiply much
+    juggernaut:
+      logScale(s.baselinePlays, A.juggernautBaselineFloor, A.juggernautBaselineFull) *
+      logScale(s.gained, A.juggernautGainFloor, A.juggernautGainFull) *
+      band(Math.max(s.doublings, 0.01), 0.01, A.juggernautFadeFrom, A.juggernautZeroAt),
+    breakout:
+      clamp01((s.burstShare - A.breakoutFloor) / (A.breakoutFull - A.breakoutFloor)) *
+      clamp01(s.doublings / A.breakoutDoublings),
+    // steady AND modest: a 2000× run is a moonshot, not a riser
+    riser:
+      clamp01(s.sustain / A.riserSustain) *
+      band(s.doublings, A.riserDoublings, A.riserFadeFrom, A.riserZeroAt),
+    flatline: clamp01(1 - s.doublings / A.flatlineDoublings),
+  };
+}
+
+export interface Classification {
+  /** Dominant archetype — what the badge is primarily called. */
+  primary: Badge;
+  /** Present only when the run is a hybrid; null when it is pure. */
+  secondary: Badge | null;
+  /** topAffinity ÷ secondAffinity. Infinity when nothing else registers. */
+  purity: number;
+  affinities: Affinities;
+}
+
+/** Score every archetype, then decide pure-vs-hybrid by how decisively one wins. */
+export function classifyByAffinity(s: TrajectorySignals): Classification {
+  const a = affinities(s);
+  const ranked = (Object.entries(a) as [Badge, number][]).sort((x, y) => y[1] - x[1]);
+  const [top, second] = ranked as [[Badge, number], [Badge, number]];
+
+  if (top[1] < AFFINITY.minTopAffinity) {
+    return { primary: "flatline", secondary: null, purity: Infinity, affinities: a };
+  }
+  const purity = second[1] > 0.02 ? top[1] / second[1] : Infinity;
+  return {
+    primary: top[0],
+    secondary: purity >= AFFINITY.purityThreshold ? null : second[0],
+    purity,
+    affinities: a,
+  };
+}
+
+/** Display name for a classification — a pure badge, or its named hybrid. */
+export function badgeName(primary: Badge, secondary: Badge | null): {
+  label: string; icon: string; blurb: string;
+} {
+  if (!secondary) return BADGE_META[primary];
+  const key = [primary, secondary].sort().join("|");
+  return (
+    HYBRID_NAMES[key] ?? {
+      label: `${BADGE_META[primary].label}/${BADGE_META[secondary].label}`,
+      icon: BADGE_META[primary].icon,
+      blurb: `Part ${BADGE_META[primary].label.toLowerCase()}, part ${BADGE_META[secondary].label.toLowerCase()}.`,
+    }
+  );
+}
+
 /** Which badge this run earned. First match wins; see BADGE_RULES. */
 export function classifyBadge(s: TrajectorySignals): Badge {
   const R = BADGE_RULES;
@@ -153,10 +244,29 @@ export function badgeScore(badge: Badge, s: TrajectorySignals, pick: ScoreInput)
   return mult * core * (w.sustain ? 0.5 + s.sustain : 1);
 }
 
+/**
+ * A hybrid scores as a blend of its two formulas, weighted by how strongly the
+ * run resembles each. Continuous by construction, so a run drifting between
+ * archetypes doesn't jump in value at the boundary.
+ */
+export function blendedScore(c: Classification, s: TrajectorySignals, pick: ScoreInput): number {
+  const primary = badgeScore(c.primary, s, pick);
+  if (!c.secondary) return primary;
+  const a1 = c.affinities[c.primary];
+  const a2 = c.affinities[c.secondary];
+  const total = a1 + a2 || 1;
+  return (primary * a1 + badgeScore(c.secondary, s, pick) * a2) / total;
+}
+
 export interface BadgeVerdict {
   badge: Badge;
+  secondary: Badge | null;
+  purity: number;
+  label: string;
+  icon: string;
   points: number;
   signals: TrajectorySignals;
+  affinities: Affinities;
 }
 
 /** Classify + score in one pass. Pure: same history always gives the same verdict. */
@@ -169,6 +279,16 @@ export function evaluatePick(
 ): BadgeVerdict | null {
   if (baselinePlays === null) return null; // provider stats disabled — pending data
   const signals = trajectorySignals(baselinePlays, pickedAt, expiresAt, history);
-  const badge = classifyBadge(signals);
-  return { badge, points: badgeScore(badge, signals, pick), signals };
+  const c = classifyByAffinity(signals);
+  const name = badgeName(c.primary, c.secondary);
+  return {
+    badge: c.primary,
+    secondary: c.secondary,
+    purity: c.purity,
+    label: name.label,
+    icon: name.icon,
+    points: blendedScore(c, signals, pick),
+    signals,
+    affinities: c.affinities,
+  };
 }

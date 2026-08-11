@@ -237,7 +237,9 @@ export function TrackPage({ id }: { id: string }) {
                     </div>
                   </div>
                   <div style={{ textAlign: "right" }}>
-                    <div style={{ marginBottom: 3 }}><BadgeChip badge={p.badge} /></div>
+                    <div style={{ marginBottom: 3 }}>
+                      <BadgeChip badge={p.badge} second={p.badgeSecond} />
+                    </div>
                     <div className="pts num">{fmtPts(p.points)} pts</div>
                     {multiple !== null && multiple >= 1.01 && (
                       <div className="delta-up num" style={{ fontSize: 12 }}>

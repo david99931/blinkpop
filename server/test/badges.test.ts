@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { BADGE_ORDER, BADGE_META } from "@firstfan/shared";
 import {
   classifyBadge, higherBadge, trajectorySignals, badgeScore, evaluatePick,
+  affinities, classifyByAffinity, badgeName, blendedScore,
 } from "../src/scoring/badges.ts";
 import { getUniverse } from "../src/sim/catalog.ts";
 
@@ -158,5 +159,74 @@ describe("cross-tab against the simulator's own archetypes", () => {
   it("leaves most picks in the bottom two badges — rarity is the product", () => {
     const low = rows.filter((r) => r.badge === "flatline" || r.badge === "riser").length / rows.length;
     expect(low).toBeGreaterThan(0.7);
+  });
+});
+
+describe("affinity classification (v5) — pure vs hybrid", () => {
+  it("scores every archetype rather than stopping at the first match", () => {
+    const a = affinities(sig(310_000, ramp(310_000, 1_200_000)));
+    // the late entry on a big track registers on BOTH axes; v4 only ever saw
+    // the Juggernaut rule because it matched first
+    expect(a.juggernaut).toBeGreaterThan(0.2);
+    expect(a.moonshot).toBeGreaterThan(0);
+    expect(Object.values(a).every((v) => v >= 0 && v <= 1)).toBe(true);
+  });
+
+  it("a decisive run earns a pure badge", () => {
+    const c = classifyByAffinity(sig(600, ramp(600, 1_200_000)));
+    expect(c.primary).toBe("moonshot");
+    expect(c.purity).toBeGreaterThanOrEqual(2);
+    expect(c.secondary).toBeNull();
+  });
+
+  it("a run that is strongly two things earns a named hybrid", () => {
+    // big base, big absolute gain, and enough doublings to register as a run
+    const c = classifyByAffinity(sig(400_000, ramp(400_000, 12_000_000)));
+    expect(c.secondary).not.toBeNull();
+    const name = badgeName(c.primary, c.secondary);
+    expect(name.label.length).toBeGreaterThan(0);
+    expect(name.label).not.toContain("/"); // a real name, not a fallback
+  });
+
+  it("every archetype pair has a name", () => {
+    for (const a of BADGE_ORDER) {
+      for (const b of BADGE_ORDER) {
+        if (a === b) continue;
+        expect(badgeName(a, b).label).not.toContain("/");
+      }
+    }
+  });
+
+  it("nothing much happening is still just a Flatline", () => {
+    const c = classifyByAffinity(sig(2_000, ramp(2_000, 2_050)));
+    expect(c.primary).toBe("flatline");
+  });
+
+  it("a hybrid scores between its two pure formulas", () => {
+    const pick = { artistAvgPlays: null, pickRank: 1, kind: "daily" as const };
+    const s = sig(400_000, ramp(400_000, 12_000_000));
+    const c = classifyByAffinity(s);
+    if (!c.secondary) return; // only meaningful for a hybrid
+    const blended = blendedScore(c, s, pick);
+    const lo = Math.min(badgeScore(c.primary, s, pick), badgeScore(c.secondary, s, pick));
+    const hi = Math.max(badgeScore(c.primary, s, pick), badgeScore(c.secondary, s, pick));
+    expect(blended).toBeGreaterThanOrEqual(lo);
+    expect(blended).toBeLessThanOrEqual(hi);
+  });
+
+  it("makes pure badges genuinely rare across the universe", () => {
+    const rows = [...getUniverse("affinity-rarity").values()].map((t) => {
+      const hist = series(Array.from({ length: 180 }, (_, d) => [d + 1, t.statsAt(d + 1).plays]));
+      return classifyByAffinity(sig(t.statsAt(0).plays, hist));
+    });
+    const pureMoon = rows.filter((c) => c.primary === "moonshot" && !c.secondary).length;
+    const hybrids = rows.filter((c) => c.secondary !== null).length;
+    // NOTE: the simulator is far more explosive than reality. 502 sampled
+    // live tracks projected ZERO instances of >=4 doublings over a 180-day
+    // window (p50 0.38, p99 2.63, max 2.78), so on real data a Moonshot at
+    // 8 doublings is currently unreachable. These bounds describe the sim
+    // only — see the calibration note in AFFINITY.
+    expect(pureMoon / rows.length).toBeLessThan(0.2);
+    expect(hybrids / rows.length).toBeGreaterThan(0.15); // and mixes are common
   });
 });

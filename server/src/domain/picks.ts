@@ -226,6 +226,8 @@ export async function makePick(
 }
 
 export interface PickView extends Pick {
+  /** The other half of a hybrid badge; null when the badge is pure. */
+  badgeSecond: import("@firstfan/shared").Badge | null;
   /** Score under this pick's badge — comparable only within that badge. */
   title: string;
   artistName: string;
@@ -247,7 +249,7 @@ export function listPicksForUser(userId: number): PickView[] {
               base.plays AS baseline_plays,
               (SELECT s.plays FROM track_snapshots s
                 WHERE s.track_id = p.track_id ORDER BY s.captured_at DESC, s.id DESC LIMIT 1) AS current_plays,
-              p.badge, p.badge_points, p.badge_at
+              p.badge, p.badge_second, p.badge_purity, p.badge_points, p.badge_at
          FROM picks p
          JOIN tracks t ON t.id = p.track_id
          JOIN track_snapshots base ON base.id = p.baseline_snapshot_id
@@ -263,6 +265,8 @@ export function listPicksForUser(userId: number): PickView[] {
     baseline_plays: number | null;
     current_plays: number | null;
     badge: import("@firstfan/shared").Badge;
+    badge_second: import("@firstfan/shared").Badge | null;
+    badge_purity: number | null;
     badge_points: number;
     badge_at: string | null;
   })[]).map((r) => {
@@ -276,6 +280,7 @@ export function listPicksForUser(userId: number): PickView[] {
       artistAvgPlays: r.artist_avg_plays,
       currentPlays: r.current_plays,
       points: r.badge_points,
+      badgeSecond: r.badge_second ?? null,
       tierLabel: tierInput === null ? null : underdogTierFor(tierInput).label,
     };
   });

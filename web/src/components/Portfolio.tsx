@@ -42,7 +42,7 @@ function PickCard({
           <div className="num" style={{ fontWeight: 800, fontSize: 17 }}>
             {fmtPts(pick.points)} pts
           </div>
-          <BadgeChip badge={pick.badge} tipLeft />
+          <BadgeChip badge={pick.badge} second={pick.badgeSecond} tipLeft />
           {pick.kind === "super" && (
             <HoverBadge
               icon="⚡"

@@ -102,6 +102,7 @@ export interface TrackPageData {
     points: number;
     kind: "daily" | "super";
     badge: Badge;
+    badgeSecond: Badge | null;
   }[];
 }
 
@@ -116,9 +117,36 @@ export const BADGE_META: Record<Badge, { label: string; icon: string; blurb: str
 };
 export const BADGE_ORDER: Badge[] = ["moonshot", "juggernaut", "breakout", "riser", "flatline"];
 
+/** Named hybrids, keyed by the sorted archetype pair. */
+export const HYBRID_NAMES: Record<string, { label: string; icon: string; blurb: string }> = {
+  "moonshot|riser": { label: "Ascendant", icon: "🌗", blurb: "Went very far, and never stopped climbing." },
+  "breakout|moonshot": { label: "Supernova", icon: "💥", blurb: "One explosive week that never came back down." },
+  "juggernaut|moonshot": { label: "Titan", icon: "🗿", blurb: "Already huge — and still ran away from you." },
+  "juggernaut|riser": { label: "Steamroller", icon: "🛞", blurb: "Enormous, and compounding anyway." },
+  "breakout|juggernaut": { label: "Aftershock", icon: "🌋", blurb: "A big track jolted back to life." },
+  "breakout|riser": { label: "Second Wind", icon: "🍃", blurb: "Spiked, then kept on going." },
+  "flatline|riser": { label: "Ember", icon: "🕯", blurb: "Barely moving — but not dead." },
+  "breakout|flatline": { label: "One Hit", icon: "🎯", blurb: "A single flare, then silence." },
+  "flatline|juggernaut": { label: "Monolith", icon: "🧱", blurb: "Vast, and utterly still." },
+  "flatline|moonshot": { label: "Bolt", icon: "🌩", blurb: "Nothing, nothing, nothing — then everything." },
+};
+
+/** Display identity for a badge, pure or hybrid. */
+export function badgeName(primary: Badge, secondary?: Badge | null) {
+  if (!secondary) return BADGE_META[primary];
+  return (
+    HYBRID_NAMES[[primary, secondary].sort().join("|")] ?? {
+      label: `${BADGE_META[primary].label}/${BADGE_META[secondary].label}`,
+      icon: BADGE_META[primary].icon,
+      blurb: "A blend of two archetypes.",
+    }
+  );
+}
+
 export interface PickView {
   id: number;
   badge: Badge;
+  badgeSecond: Badge | null;
   badgeAt: string | null;
   pickedAt: string;
   pickDate: string;

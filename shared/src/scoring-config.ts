@@ -91,6 +91,85 @@ export const BADGE_SCORING = {
 } as const;
 
 /**
+ * ── Affinity classification (v5) ────────────────────────────────────────
+ *
+ * The v4 classifier was first-match-wins, which is a cliff: a run that
+ * cleared the Juggernaut test was never measured against Moonshot at all.
+ * Instead, score a run against EVERY archetype (0–1), then look at how
+ * decisively the top one wins:
+ *
+ *   purity = topAffinity / secondAffinity
+ *   purity >= PURITY_THRESHOLD  →  a pure badge (rare, the prestige object)
+ *   otherwise                   →  a named hybrid of the top two
+ *
+ * Rarity then emerges from the data instead of being legislated: on 504
+ * simulated tracks a pure Moonshot is ~0.4% at a 2× bar, while most strong
+ * runs land as hybrids.
+ */
+export const AFFINITY = {
+  /**
+   * Doublings that count as a full-strength Moonshot signal.
+   *
+   * ⚠ CALIBRATION GAP: 502 live SoundCloud tracks sampled 2026-08-10 project
+   * a MAXIMUM of 2.78 doublings over a 180-day window (p50 0.38, p90 1.77,
+   * p99 2.63) — none reached 4. At 8 this badge is unreachable on real data.
+   * The figure is tuned to the simulator, whose growth archetypes are far
+   * more explosive than reality. Two caveats before lowering it: the sample
+   * projects from LIFETIME average rate (understating a track that is going
+   * viral right now), and search results skew to established tracks rather
+   * than the small ones this game is about. The real fix is months of live
+   * polling on actually-picked tracks, not another sample.
+   */
+  moonshotDoublings: 8,
+  /**
+   * Juggernaut is log-scaled between these anchors, taken from 950 live
+   * SoundCloud tracks (2026-08-10). The v4 flat floor of 250k/250k matched
+   * 33.7% of real tracks — far too common for a badge.
+   *   plays  p50 476k · p75 1.75M · p90 4.9M
+   *   gain   p50 162k · p75 431k  · p90 1.07M
+   */
+  juggernautBaselineFloor: 100_000,
+  juggernautBaselineFull: 5_000_000,
+  juggernautGainFloor: 50_000,
+  juggernautGainFull: 2_000_000,
+  /** Burst share below this reads as ordinary growth, not a breakout. */
+  breakoutFloor: 0.2,
+  breakoutFull: 0.7,
+  breakoutDoublings: 2,
+  riserSustain: 0.6,
+  riserDoublings: 3,
+  /**
+   * Riser and Juggernaut FADE OUT as a run gets extreme, so the archetypes
+   * are mutually exclusive rather than nested. Without this every moonshot
+   * also scores as a perfect riser and nothing is ever pure.
+   */
+  riserFadeFrom: 4,
+  riserZeroAt: 10,
+  juggernautFadeFrom: 2,
+  juggernautZeroAt: 6,
+  /** Doublings at which the Flatline signal has fully decayed. */
+  flatlineDoublings: 1.5,
+  /** Top affinity must clear this or the run is simply a Flatline. */
+  minTopAffinity: 0.25,
+  /** How decisively the leader must win to earn a pure badge. */
+  purityThreshold: 2.0,
+} as const;
+
+/** Named hybrids — the collectible surface. Keys are the sorted pair. */
+export const HYBRID_NAMES: Record<string, { label: string; blurb: string; icon: string }> = {
+  "moonshot|riser": { label: "Ascendant", icon: "🌗", blurb: "Went very far, and never stopped climbing." },
+  "breakout|moonshot": { label: "Supernova", icon: "💥", blurb: "One explosive week that never came back down." },
+  "juggernaut|moonshot": { label: "Titan", icon: "🗿", blurb: "Already huge — and still ran away from you." },
+  "juggernaut|riser": { label: "Steamroller", icon: "🛞", blurb: "Enormous, and compounding anyway." },
+  "breakout|juggernaut": { label: "Aftershock", icon: "🌋", blurb: "A big track jolted back to life." },
+  "breakout|riser": { label: "Second Wind", icon: "🍃", blurb: "Spiked, then kept on going." },
+  "flatline|riser": { label: "Ember", icon: "🕯", blurb: "Barely moving — but not dead." },
+  "breakout|flatline": { label: "One Hit", icon: "🎯", blurb: "A single flare, then silence." },
+  "flatline|juggernaut": { label: "Monolith", icon: "🧱", blurb: "Vast, and utterly still." },
+  "flatline|moonshot": { label: "Bolt", icon: "🌩", blurb: "Nothing, nothing, nothing — then everything." },
+};
+
+/**
  * Entry multiple (v3) — how much of the run you actually called.
  *
  * Every score event is scaled by how many times the track has DOUBLED since

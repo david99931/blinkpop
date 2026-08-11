@@ -12,7 +12,10 @@
     "dev:web": "npm run dev --workspace web",
     "migrate": "npm run migrate --workspace server",
     "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "corpus:seed": "npm exec --workspace server -- tsx scripts/corpus.ts seed",
+    "corpus:poll": "npm exec --workspace server -- tsx scripts/corpus.ts poll",
+    "corpus:report": "npm exec --workspace server -- tsx scripts/corpus.ts report"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,

@@ -15,10 +15,10 @@
  * anywhere; the pick's badge_points is the only score.
  */
 
-import { MILESTONES, earlyBirdTierFor, BADGE_META } from "@firstfan/shared";
+import { MILESTONES, earlyBirdTierFor } from "@firstfan/shared";
 import type { Badge } from "@firstfan/shared";
 import { inTransaction } from "../db/db.ts";
-import { evaluatePick, higherBadge, type SignalInput } from "../scoring/badges.ts";
+import { badgeName, evaluatePick, higherBadge, type SignalInput } from "../scoring/badges.ts";
 
 export interface SettleResult {
   picksExamined: number;
@@ -37,6 +37,8 @@ interface SettlePickRow {
   artist_avg_plays: number | null;
   baseline_plays: number | null;
   badge: Badge;
+  badge_second: Badge | null;
+  badge_purity: number | null;
   title: string;
   artist_name: string;
 }
@@ -46,7 +48,8 @@ export function settleDay(_simDayIndex: number): SettleResult {
     const picks = db
       .prepare(
         `SELECT p.id, p.user_id, p.track_id, p.picked_at, p.expires_at, p.pick_rank, p.kind,
-                p.artist_avg_plays, p.badge, base.plays AS baseline_plays, t.title, t.artist_name
+                p.artist_avg_plays, p.badge, p.badge_second, p.badge_purity,
+                base.plays AS baseline_plays, t.title, t.artist_name
            FROM picks p
            JOIN track_snapshots base ON base.id = p.baseline_snapshot_id
            JOIN tracks t ON t.id = p.track_id`,
@@ -57,7 +60,8 @@ export function settleDay(_simDayIndex: number): SettleResult {
       "SELECT plays, captured_at AS capturedAt FROM track_snapshots WHERE track_id = ? ORDER BY captured_at",
     );
     const updatePick = db.prepare(
-      "UPDATE picks SET badge = ?, badge_points = ?, badge_at = COALESCE(badge_at, ?) WHERE id = ?",
+      "UPDATE picks SET badge = ?, badge_second = ?, badge_purity = ?, badge_points = ?, " +
+        "badge_at = COALESCE(badge_at, ?) WHERE id = ?",
     );
     const bumpBadgeAt = db.prepare("UPDATE picks SET badge_at = ? WHERE id = ?");
     const insertMoment = db.prepare(
@@ -81,23 +85,22 @@ export function settleDay(_simDayIndex: number): SettleResult {
       if (!verdict) continue;
 
       const badge = higherBadge(p.badge, verdict.badge);
-      // Points always follow the badge actually held, which may outrank the
-      // one this window would earn on its own (badges never come back down).
-      const points =
-        badge === verdict.badge
-          ? verdict.points
-          : evaluatePick(p.baseline_plays, p.picked_at, p.expires_at, history, {
-              artistAvgPlays: p.artist_avg_plays,
-              pickRank: p.pick_rank,
-              kind: p.kind,
-            })!.points;
+      // Purity is an upgrade too: once a run has earned a PURE badge at this
+      // primary it never reverts to a hybrid, same principle as the badge.
+      const wasPure = p.badge === badge && p.badge_second === null;
+      const secondary = wasPure ? null : badge === verdict.badge ? verdict.secondary : p.badge_second;
+      // Keep the purity that JUSTIFIED the locked badge rather than the live
+      // value — otherwise a pick reads "pure" beside a sub-threshold number.
+      const purity = wasPure && p.badge_purity !== null ? p.badge_purity : verdict.purity;
+      const points = verdict.points;
 
       const now = new Date().toISOString();
-      updatePick.run(badge, points, now, p.id);
+      updatePick.run(badge, secondary, purity, points, now, p.id);
 
       if (badge !== p.badge) {
         badgesUpgraded++;
         bumpBadgeAt.run(now, p.id);
+        const named = badgeName(badge, secondary);
         const res = insertMoment.run(p.id, "badge", null, now, `pick:${p.id}:badge:${badge}`);
         if (res.changes > 0) {
           momentsLogged++;
@@ -106,7 +109,7 @@ export function settleDay(_simDayIndex: number): SettleResult {
             "badge_upgraded",
             JSON.stringify({
               pickId: p.id, trackId: p.track_id, title: p.title, artistName: p.artist_name,
-              badge, badgeLabel: BADGE_META[badge].label, icon: BADGE_META[badge].icon,
+              badge, badgeLabel: named.label, icon: named.icon,
             }),
             now,
           );
