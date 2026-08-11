@@ -111,13 +111,34 @@ export function Settings({ me }: { me: UserInfo }) {
             Default view —{" "}
             {prefs.mode === "momentum"
               ? "plays per day; falls when a track cools off"
-              : "running play count; only ever rises"}
+              : prefs.mode === "relative"
+                ? "plays ÷ your entry — the multiple that scales your points"
+                : "running play count; only ever rises"}
           </div>
           <Choice
-            options={["total", "momentum"] as const}
+            options={["total", "momentum", "relative"] as const}
             value={prefs.mode}
             onChange={(v) => setPrefs({ mode: v })}
           />
+          <p className="sub" style={{ fontSize: 11, marginBottom: 0, marginTop: 6 }}>
+            "relative" shows how many times over the track has grown since you picked it —
+            which is exactly the multiplier your points are scaled by.
+          </p>
+          {prefs.mode === "relative" && (
+            <div style={{ marginTop: 10 }}>
+              <div className="sub" style={{ marginBottom: 5 }}>
+                vs-pace axis —{" "}
+                {prefs.relativeScale === "linear"
+                  ? "peak-scaled: spikes tower, but everything below pace crowds the floor"
+                  : "centred on the benchmark, equal room above and below"}
+              </div>
+              <Choice
+                options={["linear", "log"] as const}
+                value={prefs.relativeScale}
+                onChange={(v) => setPrefs({ relativeScale: v })}
+              />
+            </div>
+          )}
         </div>
 
         <div style={{ marginTop: 14 }}>

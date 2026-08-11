@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type MyPicks, type TrackPageData } from "../api.ts";
 import { Artwork, fmt, fmtDate, fmtPts, HoverBadge, TierBadge, useWorldVersion, worldChanged } from "../util.tsx";
+import { BadgeChip } from "./BadgeChip.tsx";
 import { StockChart, type ChartMarker } from "./StockChart.tsx";
-import { BEHIND_PACE_RATIO } from "@firstfan/shared";
+import { underdogTierFor } from "@firstfan/shared";
 
 function FakePlayer() {
   const [playing, setPlaying] = useState(false);
@@ -47,6 +48,17 @@ export function TrackPage({ id }: { id: string }) {
   const marker: ChartMarker | undefined = myPick
     ? { t: Date.parse(myPick.pickedAt), label: `you · in at ${fmt(myPick.baselinePlays)}` }
     : undefined;
+
+  /**
+   * If you own a pick here, judge the track against the tier YOUR pick was
+   * locked into — the artist may have grown since, but the scoring engine
+   * still uses the average captured at pick time. Otherwise show the tier a
+   * new picker would get today.
+   */
+  const benchmark =
+    myPick && myPick.baselinePlays !== null
+      ? { baselinePlays: myPick.baselinePlays, label: myPick.tierLabel ?? "" }
+      : undefined;
   const canPick = (!mine.pickedToday || mine.superAvailable) && !alreadyPickedThis;
   const earlyBird =
     track.stats.plays !== null && track.stats.plays < 1000
@@ -132,9 +144,7 @@ export function TrackPage({ id }: { id: string }) {
           <StockChart
             points={data.sparkline}
             marker={marker}
-            benchmark={
-              tier ? { idealDailyGrowth: tier.idealDailyGrowth, label: tier.label } : undefined
-            }
+            benchmark={benchmark}
           />
         </div>
       )}
@@ -227,6 +237,7 @@ export function TrackPage({ id }: { id: string }) {
                     </div>
                   </div>
                   <div style={{ textAlign: "right" }}>
+                    <div style={{ marginBottom: 3 }}><BadgeChip badge={p.badge} /></div>
                     <div className="pts num">{fmtPts(p.points)} pts</div>
                     {multiple !== null && multiple >= 1.01 && (
                       <div className="delta-up num" style={{ fontSize: 12 }}>

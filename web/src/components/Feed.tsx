@@ -28,14 +28,12 @@ function FeedCard({ item }: { item: FeedItem }) {
                 crossed <b className="num">{fmt(item.milestoneValue ?? null)}</b> 🚀
               </>
             ) : item.eventType === "early_bird" ? (
-              <>paid out the early-bird bonus 🐦</>
+              <>was an early-bird call 🐦</>
+            ) : item.eventType === "badge" ? (
+              <>earned a new badge 🏅</>
             ) : (
-              <>had a breakout week 📈</>
-            )}{" "}
-            <span className={(item.points ?? 0) < 0 ? "delta-down num" : "delta-up num"}>
-              {(item.points ?? 0) < 0 ? "" : "+"}
-              {fmtPts(item.points ?? 0)} pts
-            </span>
+              <>hit a milestone 📈</>
+            )}
           </p>
         )}
         <span className="sub">{item.artistName}</span>

@@ -9,21 +9,35 @@ import { useEffect, useState } from "react";
 
 export type RangeKey = "1W" | "1M" | "3M" | "All";
 export type IntervalKey = "auto" | "1h" | "4h" | "12h" | "1D" | "1W";
-/** "total" = cumulative plays (only rises). "momentum" = plays/day (rises AND falls). */
-export type ChartMode = "total" | "momentum";
+/**
+ * "total"    = cumulative plays (only ever rises)
+ * "momentum" = plays/day (rises AND falls)
+ * "relative" = plays ÷ your baseline — the entry multiple, which is exactly
+ *              what scales your points. 1× is where you got in.
+ */
+export type ChartMode = "total" | "momentum" | "relative";
+
+/**
+ * Axis for the "vs pace" view. "linear" gives spikes their full height
+ * (a 24× week towers over the benchmark); "log" compresses them so that
+ * 2× above and 2× below sit the same distance from the centreline.
+ */
+export type RelativeScale = "linear" | "log";
 
 export interface ChartPrefs {
   defaultRange: RangeKey;
   interval: IntervalKey;
   showVolume: boolean;
   mode: ChartMode;
+  relativeScale: RelativeScale;
 }
 
 export const DEFAULT_PREFS: ChartPrefs = {
   defaultRange: "All",
-  interval: "auto",
+  interval: "1D",
   showVolume: true,
-  mode: "total",
+  mode: "momentum",
+  relativeScale: "log", // benchmark centred — the readable default
 };
 
 /** Milliseconds per interval; "auto" is resolved from the visible span. */

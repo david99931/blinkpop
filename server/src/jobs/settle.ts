@@ -1,23 +1,29 @@
 /**
- * Settlement: run the pure scoring engine over every pick and persist any
- * NEW score events. Idempotent by construction — events insert with
- * `INSERT OR IGNORE` on the UNIQUE dedupe_key, so re-running settlement
- * (or recomputing history from scratch) can never double-award.
+ * Settlement (v4): classify every live pick by its track's trajectory, upgrade
+ * its badge if the run earned a better one, and store the score under that
+ * badge's own formula.
  *
- * Cadence (spec rule 8): in Phase 1 sim-time, the time-warp calls this once
- * per simulated day, which also covers the weekly bonus (the engine emits a
- * week's event as soon as a snapshot at/after the week's end exists).
- * Phase 2 real-time wiring: daily batch for all live picks + hourly pass for
- * "hot" tracks — cadence should be a config value per track tier.
+ * badge_points is DERIVED — recomputed from the full snapshot history every
+ * pass — because the per-badge formulas are whole-trajectory functions (peak
+ * burst, sustain) with nothing to accrue incrementally. That makes idempotency
+ * structural: the same history always yields the same verdict, so re-running
+ * settlement can't drift.
+ *
+ * score_events is now a MOMENT log for the feed and inbox — milestone
+ * crossings, early-bird payouts, badge upgrades — deduped by `dedupe_key` so
+ * a moment is announced exactly once. Its points column is not summed
+ * anywhere; the pick's badge_points is the only score.
  */
 
+import { MILESTONES, earlyBirdTierFor, BADGE_META } from "@firstfan/shared";
+import type { Badge } from "@firstfan/shared";
 import { inTransaction } from "../db/db.ts";
-import { scorePick, type SnapshotPoint } from "../scoring/engine.ts";
+import { evaluatePick, higherBadge, type SignalInput } from "../scoring/badges.ts";
 
 export interface SettleResult {
   picksExamined: number;
-  eventsInserted: number;
-  pointsAwarded: number;
+  badgesUpgraded: number;
+  momentsLogged: number;
 }
 
 interface SettlePickRow {
@@ -25,23 +31,22 @@ interface SettlePickRow {
   user_id: number;
   track_id: number;
   picked_at: string;
-  pick_rank: number;
   expires_at: string;
+  pick_rank: number;
   kind: "daily" | "super";
   artist_avg_plays: number | null;
   baseline_plays: number | null;
+  badge: Badge;
   title: string;
   artist_name: string;
 }
 
 export function settleDay(_simDayIndex: number): SettleResult {
   return inTransaction((db) => {
-    // Expired picks are included: a crossing that happened before expiry may
-    // not have been settled yet; the engine caps everything at expires_at.
     const picks = db
       .prepare(
-        `SELECT p.id, p.user_id, p.track_id, p.picked_at, p.pick_rank, p.expires_at, p.kind,
-                p.artist_avg_plays, base.plays AS baseline_plays, t.title, t.artist_name
+        `SELECT p.id, p.user_id, p.track_id, p.picked_at, p.expires_at, p.pick_rank, p.kind,
+                p.artist_avg_plays, p.badge, base.plays AS baseline_plays, t.title, t.artist_name
            FROM picks p
            JOIN track_snapshots base ON base.id = p.baseline_snapshot_id
            JOIN tracks t ON t.id = p.track_id`,
@@ -51,67 +56,109 @@ export function settleDay(_simDayIndex: number): SettleResult {
     const snapshotsFor = db.prepare(
       "SELECT plays, captured_at AS capturedAt FROM track_snapshots WHERE track_id = ? ORDER BY captured_at",
     );
-    const insertEvent = db.prepare(
+    const updatePick = db.prepare(
+      "UPDATE picks SET badge = ?, badge_points = ?, badge_at = COALESCE(badge_at, ?) WHERE id = ?",
+    );
+    const bumpBadgeAt = db.prepare("UPDATE picks SET badge_at = ? WHERE id = ?");
+    const insertMoment = db.prepare(
       "INSERT OR IGNORE INTO score_events (pick_id, type, milestone_value, points, computed_at, dedupe_key) " +
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, 0, ?, ?)",
     );
     const insertNotification = db.prepare(
       "INSERT INTO notifications (user_id, type, payload, created_at) VALUES (?, ?, ?, ?)",
     );
 
-    let eventsInserted = 0;
-    let pointsAwarded = 0;
+    let badgesUpgraded = 0;
+    let momentsLogged = 0;
 
     for (const p of picks) {
-      const history = snapshotsFor.all(p.track_id) as unknown as SnapshotPoint[];
-      const drafts = scorePick(
-        {
-          pickId: p.id,
-          baselinePlays: p.baseline_plays,
-          artistAvgPlays: p.artist_avg_plays,
-          pickRank: p.pick_rank,
-          kind: p.kind,
-          pickedAt: p.picked_at,
-          expiresAt: p.expires_at,
-        },
-        history,
-      );
-      for (const d of drafts) {
-        const res = insertEvent.run(
-          d.pickId,
-          d.type,
-          d.milestoneValue,
-          d.points,
-          d.occurredAt,
-          d.dedupeKey,
-        );
+      const history = snapshotsFor.all(p.track_id) as unknown as SignalInput[];
+      const verdict = evaluatePick(p.baseline_plays, p.picked_at, p.expires_at, history, {
+        artistAvgPlays: p.artist_avg_plays,
+        pickRank: p.pick_rank,
+        kind: p.kind,
+      });
+      if (!verdict) continue;
+
+      const badge = higherBadge(p.badge, verdict.badge);
+      // Points always follow the badge actually held, which may outrank the
+      // one this window would earn on its own (badges never come back down).
+      const points =
+        badge === verdict.badge
+          ? verdict.points
+          : evaluatePick(p.baseline_plays, p.picked_at, p.expires_at, history, {
+              artistAvgPlays: p.artist_avg_plays,
+              pickRank: p.pick_rank,
+              kind: p.kind,
+            })!.points;
+
+      const now = new Date().toISOString();
+      updatePick.run(badge, points, now, p.id);
+
+      if (badge !== p.badge) {
+        badgesUpgraded++;
+        bumpBadgeAt.run(now, p.id);
+        const res = insertMoment.run(p.id, "badge", null, now, `pick:${p.id}:badge:${badge}`);
         if (res.changes > 0) {
-          eventsInserted++;
-          pointsAwarded += d.points;
-          // Growth accrues every couple of hours — points move silently;
-          // notifications are reserved for milestone/early-bird moments.
-          if (d.type === "growth") continue;
+          momentsLogged++;
           insertNotification.run(
             p.user_id,
-            d.type === "milestone"
-              ? "milestone_crossed"
-              : d.type === "weekly_growth"
-                ? "weekly_growth_awarded"
-                : "early_bird_awarded",
+            "badge_upgraded",
             JSON.stringify({
-              pickId: p.id,
-              trackId: p.track_id,
-              title: p.title,
-              artistName: p.artist_name,
-              milestoneValue: d.milestoneValue,
-              points: d.points,
+              pickId: p.id, trackId: p.track_id, title: p.title, artistName: p.artist_name,
+              badge, badgeLabel: BADGE_META[badge].label, icon: BADGE_META[badge].icon,
             }),
-            d.occurredAt,
+            now,
+          );
+        }
+      }
+
+      // ── Moments for the feed: milestone crossings and the early-bird payout.
+      const B = p.baseline_plays!;
+      const inWindow = history
+        .filter((s) => s.plays !== null)
+        .filter((s) => s.capturedAt >= p.picked_at && s.capturedAt <= p.expires_at);
+      let firstCrossing: SignalInput | null = null;
+      for (const m of MILESTONES) {
+        if (B >= m.plays) continue;
+        const crossing = inWindow.find((s) => s.plays! >= m.plays);
+        if (!crossing) continue;
+        if (!firstCrossing) firstCrossing = crossing;
+        const res = insertMoment.run(
+          p.id, "milestone", m.plays, crossing.capturedAt, `pick:${p.id}:milestone:${m.plays}`,
+        );
+        if (res.changes > 0) {
+          momentsLogged++;
+          insertNotification.run(
+            p.user_id,
+            "milestone_crossed",
+            JSON.stringify({
+              pickId: p.id, trackId: p.track_id, title: p.title,
+              artistName: p.artist_name, milestoneValue: m.plays,
+            }),
+            crossing.capturedAt,
+          );
+        }
+      }
+
+      if (earlyBirdTierFor(B) && firstCrossing) {
+        const res = insertMoment.run(
+          p.id, "early_bird", null, firstCrossing.capturedAt, `pick:${p.id}:early_bird`,
+        );
+        if (res.changes > 0) {
+          momentsLogged++;
+          insertNotification.run(
+            p.user_id,
+            "early_bird_awarded",
+            JSON.stringify({
+              pickId: p.id, trackId: p.track_id, title: p.title, artistName: p.artist_name,
+            }),
+            firstCrossing.capturedAt,
           );
         }
       }
     }
 
-    return { picksExamined: picks.length, eventsInserted, pointsAwarded };
+    return { picksExamined: picks.length, badgesUpgraded, momentsLogged };
   });
 }

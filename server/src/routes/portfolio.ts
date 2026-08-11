@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getDb } from "../db/db.ts";
+import { BADGE_ORDER } from "@firstfan/shared";
 import { listPicksForUser } from "../domain/picks.ts";
 import { getUserByHandle } from "../domain/users.ts";
 
@@ -11,6 +12,12 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
     const db = getDb();
 
     const picks = listPicksForUser(user.id);
+    // Badge scores aren't comparable across badges, so the headline is the
+    // badge shelf — how many of each kind you've called — not one total.
+    const shelf = Object.fromEntries(
+      BADGE_ORDER.map((b) => [b, picks.filter((p) => p.badge === b).length]),
+    ) as Record<string, number>;
+    const bestBadge = BADGE_ORDER.slice().reverse().find((b) => shelf[b]! > 0) ?? "flatline";
     const totalPoints = picks.reduce((s, p) => s + p.points, 0);
 
     const eventRows = db
@@ -51,6 +58,8 @@ export async function portfolioRoutes(app: FastifyInstance): Promise<void> {
 
     return {
       user: { handle: user.handle, displayName: user.displayName, createdAt: user.createdAt },
+      shelf,
+      bestBadge,
       totalPoints,
       currentStreak: streak?.current_streak ?? 0,
       longestStreak: streak?.longest_streak ?? 0,

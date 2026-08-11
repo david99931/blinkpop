@@ -15,27 +15,27 @@ const { makePick } = await import("../src/domain/picks.ts");
 const { warp } = await import("../src/sim/warp.ts");
 const { settleDay } = await import("../src/jobs/settle.ts");
 
-const milestoneTotal = (userId: number): number =>
-  (
-    getDb()
-      .prepare(
-        `SELECT COALESCE(SUM(e.points), 0) AS pts
-           FROM score_events e JOIN picks p ON p.id = e.pick_id
-          WHERE p.user_id = ? AND e.type = 'milestone'`,
-      )
-      .get(userId) as { pts: number }
-  ).pts;
-
+/** v4: the score lives on the pick, under the badge it earned. */
 const totalPoints = (userId: number): number =>
   (
     getDb()
-      .prepare(
-        `SELECT COALESCE(SUM(e.points), 0) AS pts
-           FROM score_events e JOIN picks p ON p.id = e.pick_id
-          WHERE p.user_id = ?`,
-      )
+      .prepare("SELECT COALESCE(SUM(badge_points), 0) AS pts FROM picks WHERE user_id = ?")
       .get(userId) as { pts: number }
   ).pts;
+
+const badgeOf = (userId: number): string =>
+  (getDb().prepare("SELECT badge FROM picks WHERE user_id = ?").get(userId) as { badge: string })
+    .badge;
+
+const milestoneMoments = (userId: number): number =>
+  (
+    getDb()
+      .prepare(
+        `SELECT COUNT(*) AS n FROM score_events e JOIN picks p ON p.id = e.pick_id
+          WHERE p.user_id = ? AND e.type = 'milestone'`,
+      )
+      .get(userId) as { n: number }
+  ).n;
 
 let alice: { id: number }; // dream call: story-dream at 600 plays, rank 1
 let bob: { id: number }; //   big-artist: story-bigartist at 4M, rank 1
@@ -58,39 +58,57 @@ beforeAll(async () => {
 });
 
 describe("settlement after 100 simulated days", () => {
-  it("alice (dream call) has exactly 5,400 milestone points", () => {
-    expect(milestoneTotal(alice.id)).toBe(5400);
+  it("alice's dream call earns the Moonshot badge and the top score", () => {
+    expect(badgeOf(alice.id)).toBe("moonshot");
+    expect(totalPoints(alice.id)).toBeGreaterThan(totalPoints(bob.id));
+    expect(totalPoints(alice.id)).toBeGreaterThan(totalPoints(carol.id));
+    expect(milestoneMoments(alice.id)).toBe(7); // 10k → 1M, logged for the feed
   });
 
-  it("bob (big-artist) has exactly 82.5 milestone points", () => {
-    expect(milestoneTotal(bob.id)).toBe(82.5);
+  it("bob's big-artist track is a Juggernaut, not a Moonshot", () => {
+    // 4M → 11.2M: huge absolute reach, barely over one doubling.
+    expect(badgeOf(bob.id)).toBe("juggernaut");
+    expect(totalPoints(bob.id)).toBeGreaterThan(0);
   });
 
-  it("carol (flatline) earns exactly 0 — it never beats its tier's curve", () => {
-    // v2.2: growth only pays above the ideal curve, and this track is behind
-    // it from the first week. Most picks scoring 0 is the intended shape.
-    expect(totalPoints(carol.id)).toBe(0);
+  it("carol's flatline stays a Riser at best and scores next to nothing", () => {
+    expect(["flatline", "riser"]).toContain(badgeOf(carol.id));
+    expect(milestoneMoments(carol.id)).toBe(0);
+    // she ranks at the bottom of her own badge; cross-badge totals are not
+    // meant to be compared, so this only checks the order of magnitude.
+    expect(totalPoints(carol.id)).toBeLessThan(totalPoints(alice.id) / 20);
   });
 
-  it("dana (rank 2 at ~310k baseline) got 500k+1M at 0.3 × 0.9", () => {
-    expect(milestoneTotal(dana.id)).toBeCloseTo((125 + 250) * 0.3 * 0.9, 10);
+  it("the badge is judged from YOUR entry, so a late picker gets a different one", () => {
+    // Same track. alice caught it at 600 and rode ~11 doublings → Moonshot.
+    // dana joined at ~310k, so the run SHE called was "already-big track adds
+    // a lot of reach" → Juggernaut. Two honest badges for two real calls,
+    // and they never compete on one leaderboard.
+    expect(badgeOf(alice.id)).toBe("moonshot");
+    expect(badgeOf(dana.id)).toBe("juggernaut");
   });
 
-  it("balance invariant holds end-to-end: early call ≫ mega-hit", () => {
-    expect(milestoneTotal(alice.id)).toBeGreaterThan(10 * milestoneTotal(bob.id));
+  it("badges separate the achievements instead of ranking them against each other", () => {
+    // The point of v4: alice and bob hold DIFFERENT badges, so their scores
+    // are never in competition. Both are real calls.
+    expect(badgeOf(alice.id)).not.toBe(badgeOf(bob.id));
+    expect(totalPoints(alice.id)).toBeGreaterThan(0);
+    expect(totalPoints(bob.id)).toBeGreaterThan(0);
   });
 
   it("re-running settlement changes nothing (idempotent)", () => {
-    const before = getDb()
-      .prepare("SELECT COUNT(*) AS n, COALESCE(SUM(points), 0) AS pts FROM score_events")
-      .get() as { n: number; pts: number };
+    const snap = () =>
+      getDb()
+        .prepare("SELECT id, badge, ROUND(badge_points, 6) AS pts FROM picks ORDER BY id")
+        .all();
+    const moments = () =>
+      (getDb().prepare("SELECT COUNT(*) AS n FROM score_events").get() as { n: number }).n;
+    const before = snap(), beforeMoments = moments();
     const result = settleDay(100);
-    expect(result.eventsInserted).toBe(0);
-    expect(result.pointsAwarded).toBe(0);
-    const after = getDb()
-      .prepare("SELECT COUNT(*) AS n, COALESCE(SUM(points), 0) AS pts FROM score_events")
-      .get() as { n: number; pts: number };
-    expect(after).toEqual(before);
+    expect(result.badgesUpgraded).toBe(0);
+    expect(result.momentsLogged).toBe(0);
+    expect(snap()).toEqual(before);
+    expect(moments()).toBe(beforeMoments);
   });
 
   it("settlement produced notifications for the pick owners", () => {
@@ -102,5 +120,10 @@ describe("settlement after 100 simulated days", () => {
     const byUser = new Map(rows.map((r) => [r.user_id, r.n]));
     expect(byUser.get(alice.id)).toBe(7); // 10k → 1M
     expect(byUser.get(bob.id)).toBe(2); // 5M (day 13) and 10M (day 75)
+    // and everyone whose badge moved got told about it
+    const upgrades = getDb()
+      .prepare("SELECT COUNT(*) AS n FROM notifications WHERE type = 'badge_upgraded'")
+      .get() as { n: number };
+    expect(upgrades.n).toBeGreaterThan(0);
   });
 });

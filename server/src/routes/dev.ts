@@ -8,6 +8,8 @@ import { isRealTime, simDay, simNow } from "../sim/clock.ts";
 import { warp } from "../sim/warp.ts";
 import { seedDemo } from "../sim/seed-demo.ts";
 import { activeProviderName } from "../providers/index.ts";
+import { getDb } from "../db/db.ts";
+import { settleDay } from "../jobs/settle.ts";
 
 export async function devRoutes(app: FastifyInstance): Promise<void> {
   app.get("/api/dev/clock", async () => ({
@@ -16,6 +18,18 @@ export async function devRoutes(app: FastifyInstance): Promise<void> {
     simDay: isRealTime() ? null : simDay(),
     simTime: simNow().toISOString(),
   }));
+
+  /**
+   * Recompute every pick's score events from snapshot history. Needed after a
+   * scoring-rules change, since settlement's INSERT OR IGNORE never restates
+   * rows that already exist (migration 008 clears them; this rebuilds them).
+   */
+  app.post("/api/dev/resettle", async () => {
+    const before = getDb().prepare("SELECT COUNT(*) AS n FROM score_events").get() as { n: number };
+    const result = settleDay(simDay());
+    const after = getDb().prepare("SELECT COUNT(*) AS n FROM score_events").get() as { n: number };
+    return { picksExamined: result.picksExamined, eventsBefore: before.n, eventsAfter: after.n };
+  });
 
   app.post("/api/dev/seed-demo", async (_req, reply) => {
     try {

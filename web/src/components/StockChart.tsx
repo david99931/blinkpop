@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SnapshotPoint } from "../api.ts";
 import { fmt } from "../util.tsx";
-import { INTERVAL_MS, usePrefs, type ChartMode, type IntervalKey, type RangeKey } from "../settings.ts";
+import {
+  INTERVAL_MS,
+  usePrefs,
+  type ChartMode,
+  type IntervalKey,
+  type RangeKey,
+  type RelativeScale,
+} from "../settings.ts";
 
 /**
  * Robinhood-register plays chart: big number + signed delta header that
@@ -32,6 +39,14 @@ function fmtWhen(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
     month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC",
   });
+}
+
+/** Compact ratio label: 12×, 3.4×, 0.25×. */
+function fmtRatio(r: number): string {
+  if (r >= 10) return String(Math.round(r));
+  if (r >= 1) return r.toFixed(1).replace(/\.0$/, "");
+  if (r >= 0.1) return r.toFixed(2).replace(/0$/, "");
+  return r.toFixed(3);
 }
 
 function fmtTick(ms: number, spanMs: number): string {
@@ -108,10 +123,10 @@ export interface ChartMarker {
   label: string;
 }
 
-/** The tier's expected growth curve, used as the benchmark line. */
+/** The pick this chart is measured against — its baseline is the 1× line. */
 export interface Benchmark {
-  /** Expected daily growth as a fraction of plays. */
-  idealDailyGrowth: number;
+  /** Plays at the moment of the pick; the entry multiple is plays ÷ this. */
+  baselinePlays: number;
   label: string;
 }
 
@@ -137,6 +152,7 @@ export function StockChart({
   const [range, setRange] = useState<RangeKey>(prefs.defaultRange);
   const [interval, setIntervalKey] = useState<IntervalKey>(prefs.interval);
   const [mode, setMode] = useState<ChartMode>(prefs.mode);
+  const [relScale, setRelScale] = useState<RelativeScale>(prefs.relativeScale);
   /** Explicit zoom/pan window; null = follow the range preset. */
   const [view, setView] = useState<{ s: number; e: number } | null>(null);
   const [hover, setHover] = useState<number | null>(null);
@@ -149,6 +165,7 @@ export function StockChart({
   useEffect(() => setRange(prefs.defaultRange), [prefs.defaultRange]);
   useEffect(() => setIntervalKey(prefs.interval), [prefs.interval]);
   useEffect(() => setMode(prefs.mode), [prefs.mode]);
+  useEffect(() => setRelScale(prefs.relativeScale), [prefs.relativeScale]);
 
   const bounds = useMemo(() => {
     if (all.length === 0) return { s: 0, e: 1 };
@@ -199,24 +216,92 @@ export function StockChart({
   });
   if (rates.length > 1) rates[0] = rates[1]!; // avoid a phantom zero at the left edge
 
-  const values = mode === "momentum" ? rates : data.map((d) => d.plays);
+  /**
+   * Entry multiple: plays ÷ the baseline you got in at. This is literally the
+   * factor the scoring engine scales every event by, so the chart and the
+   * ledger agree by construction. Above 1× you're in profit on the call.
+   */
+  const multiples = benchmark
+    ? data.map((d) => d.plays / Math.max(1, benchmark.baselinePlays))
+    : null;
+  /**
+   * Green where the track is still adding plays at a rate that earns —
+   * i.e. this interval beat the pick's own average pace so far. No fixed
+   * threshold, so it can't be biased by how old the track is.
+   */
+  const avgRate = rates.reduce((s, r) => s + r, 0) / Math.max(1, rates.length);
+  const beating = rates.map((r) => r >= avgRate * 0.5);
 
   /**
-   * The tier's expected pace at each point: a track this size "should" be
-   * gaining `plays × idealDailyGrowth` per day. Comparing LOCAL pace against
-   * it (rather than cumulative totals) is what makes a stale stretch read red
-   * even after a huge earlier spike — and it mirrors exactly what the scoring
-   * engine gates on.
+   * "vs pace": actual ÷ expected, so the benchmark is a flat line and every
+   * track reads on the same scale whatever its size. Linear gives spikes
+   * their full height; log compresses them so 2× above and 2× below sit the
+   * same distance from the line. `ratios` stays raw either way — only the
+   * plotted values change — so the header reads the same in both.
    */
-  const idealRates = benchmark
-    ? data.map((d, i) => (i === 0 ? 0 : data[i - 1]!.plays * benchmark.idealDailyGrowth))
-    : null;
-  if (idealRates && idealRates.length > 1) idealRates[0] = idealRates[1]!;
-  const beating = data.map((_, i) => (idealRates ? rates[i]! >= idealRates[i]! : true));
+  const ratios = multiples;
+  const logScale = relScale === "log";
+  const relValues = ratios ? (logScale ? ratios.map((r) => Math.log2(r)) : ratios) : null;
+  /**
+   * Log axis: symmetric around the benchmark and sized to THIS window's
+   * excursion, so the line always fills the plot instead of hugging one edge
+   * inside a fixed domain. The floor stops a track sitting on the benchmark
+   * from zooming into meaningless noise.
+   */
+  const relSpan =
+    relValues && logScale
+      ? Math.max(0.6, ...relValues.map((v) => Math.abs(v)))
+      : 1;
 
-  const yMax = Math.max(...values, ...(mode === "momentum" && idealRates ? idealRates : []));
-  const yMin = mode === "momentum" ? 0 : Math.min(...values);
+  /**
+   * The cumulative benchmark for the TOTAL view: where tier pace would have
+   * carried the track from the anchor (your entry if you own a pick, else
+   * the left edge). It compounds — `anchor × (1 + rate)^days` — which is a
+   * curve on a linear axis and a STRAIGHT LINE on a log one. That's the
+   * whole reason to offer a log y-axis: exponential growth plots straight,
+   * so "am I keeping pace?" becomes "is my line steeper than the reference?"
+   */
+  const anchorIdx =
+    marker && marker.t >= data[0]!.t
+      ? Math.max(0, data.findIndex((d) => d.t >= marker.t))
+      : 0;
+  const anchorT = data[anchorIdx]?.t ?? t0;
+  const anchorPlays = data[anchorIdx]?.plays ?? data[0]!.plays;
+  /** In "total" view, mark where you got in as a flat reference line. */
+  const idealPlays =
+    benchmark && mode === "total" ? data.map(() => benchmark.baselinePlays) : null;
+  void anchorT;
+  void anchorPlays;
+
+  /** Raw, scale-independent values — what the header always reports. */
+  const rawValues =
+    mode === "relative" ? (ratios ?? data.map(() => 1)) : mode === "momentum" ? rates : data.map((d) => d.plays);
+
+  const values =
+    mode === "relative" && relValues
+      ? relValues
+      : mode === "momentum"
+        ? rates
+        : data.map((d) => d.plays);
+  const idealPlotted = idealPlays;
+
+  const yMax =
+    mode === "relative"
+      ? logScale
+        ? relSpan
+        : Math.max(1.15, ...(relValues ?? [1])) // always leave the 1× line visible
+      : Math.max(...values, ...(idealPlotted ?? []));
+  const yMin =
+    mode === "relative"
+      ? logScale
+        ? -relSpan
+        : 0
+      : mode === "momentum"
+        ? 0
+        : Math.min(...values, ...(idealPlotted ?? []));
   const ySpan = yMax - yMin || 1;
+  /** Where the benchmark sits in plotted units: 0 on log, 1 on linear. */
+  const benchmarkValue = logScale ? 0 : 1;
   const x = (t: number) => PAD.l + ((t - t0) / (t1 - t0 || 1)) * (W - PAD.l - PAD.r);
   const y = (v: number) => PAD.t + (1 - (v - yMin) / ySpan) * (PRICE_H - PAD.t);
 
@@ -227,18 +312,29 @@ export function StockChart({
   const tickCount = 4;
   const ticks = Array.from({ length: tickCount }, (_, i) => t0 + ((t1 - t0) * i) / (tickCount - 1));
 
+  // Y ticks, benchmark first so it survives collision pruning. Candidates
+  // that would land within a label's height of one already kept are dropped
+  // — otherwise a 41× axis stacks "0×" on "1×", and a window entirely below
+  // pace stacks the axis top on the benchmark.
+  const yTicks: number[] = [];
+  const yCandidates =
+    mode === "relative" ? [benchmarkValue, yMax, ...(logScale ? [yMin] : [])] : [yMin, yMax];
+  for (const v of yCandidates) {
+    if (yTicks.every((k) => Math.abs(y(k) - y(v)) > 18)) yTicks.push(v);
+  }
+
   const lastIdx = data.length - 1;
   const focusIdx = hover !== null && hover <= lastIdx ? hover : lastIdx;
   const first = data[0]!;
   const last = data[lastIdx]!;
   const focus = data[focusIdx]!;
 
-  const firstValue = values[0]!;
-  const focusValue = values[focusIdx]!;
+  const firstValue = rawValues[0]!;
+  const focusValue = rawValues[focusIdx]!;
   const delta = focusValue - firstValue;
   const deltaPct = firstValue > 0 ? (delta / firstValue) * 100 : null;
 
-  /** Is the track currently at or above its tier's expected pace? */
+  /** Is the track still adding plays at a rate worth anything? */
   const onPace = beating[lastIdx] ?? true;
   const up = benchmark ? onPace : delta >= 0;
   const dirColor = up ? "var(--up)" : "var(--down)";
@@ -252,7 +348,7 @@ export function StockChart({
    * Runs overlap by a point so there are no gaps at the crossings.
    */
   const segments: { above: boolean; d: string }[] = [];
-  if (idealRates && data.length > 1) {
+  if (multiples && data.length > 1) {
     // Each drawn segment spans points [i-1, i] and takes the state at i.
     const segAbove = data.slice(1).map((_, i) => beating[i + 1]!);
     let run = 0;
@@ -363,33 +459,53 @@ export function StockChart({
     <div>
       <div className="row" style={{ alignItems: "flex-end", marginBottom: 6 }}>
         <div style={{ minWidth: 0 }}>
-          <div className="num" style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.1 }}>
-            {fmt(Math.round(focusValue))}
-            {mode === "momentum" && (
-              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-3)" }}> /day</span>
-            )}
-          </div>
-          <div className="num" style={{ fontSize: 13, color: dirColor, fontWeight: 700 }}>
-            {delta >= 0 ? "▲" : "▼"} {delta >= 0 ? "+" : "−"}
-            {fmt(Math.round(Math.abs(delta)))}
-            {deltaPct !== null && Math.abs(deltaPct) < 100000 && (
-              <> ({deltaPct >= 0 ? "+" : ""}{Math.abs(deltaPct) >= 100 ? Math.round(deltaPct) : deltaPct.toFixed(1)}%)</>
-            )}
-            <span style={{ color: "var(--text-3)", fontWeight: 400 }}>
-              {" "}·{" "}
-              {hover !== null
-                ? `${fmtWhen(focus.iso)}${volumes[focusIdx] ? ` · +${fmt(volumes[focusIdx]!)}` : ""}`
-                : `${mode === "momentum" ? "pace" : "plays"}, ${zoomed ? "zoomed" : range === "All" ? "all time" : `past ${range}`}`}
-            </span>
-          </div>
+          {mode === "relative" ? (
+            <>
+              <div className="num" style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.1 }}>
+                {fmtRatio(ratios?.[focusIdx] ?? 1)}×
+                <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-3)" }}>
+                  {" "}since your entry
+                </span>
+              </div>
+              <div className="num" style={{ fontSize: 13, color: dirColor, fontWeight: 700 }}>
+                {(ratios?.[focusIdx] ?? 1) >= 1 ? "▲ above" : "▼ below"} the line
+                <span style={{ color: "var(--text-3)", fontWeight: 400 }}>
+                  {" "}·{" "}
+                  {hover !== null
+                    ? `${fmtWhen(focus.iso)}${volumes[focusIdx] ? ` · +${fmt(volumes[focusIdx]!)} plays` : ""}`
+                    : `${fmt(data[focusIdx]!.plays)} plays vs ${fmt(benchmark?.baselinePlays ?? 0)} at pick`}
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="num" style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.1 }}>
+                {fmt(Math.round(focusValue))}
+                {mode === "momentum" && (
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-3)" }}> /day</span>
+                )}
+              </div>
+              <div className="num" style={{ fontSize: 13, color: dirColor, fontWeight: 700 }}>
+                {delta >= 0 ? "▲" : "▼"} {delta >= 0 ? "+" : "−"}
+                {fmt(Math.round(Math.abs(delta)))}
+                {deltaPct !== null && Math.abs(deltaPct) < 100000 && (
+                  <> ({deltaPct >= 0 ? "+" : ""}{Math.abs(deltaPct) >= 100 ? Math.round(deltaPct) : deltaPct.toFixed(1)}%)</>
+                )}
+                <span style={{ color: "var(--text-3)", fontWeight: 400 }}>
+                  {" "}·{" "}
+                  {hover !== null
+                    ? `${fmtWhen(focus.iso)}${volumes[focusIdx] ? ` · +${fmt(volumes[focusIdx]!)}` : ""}`
+                    : `${mode === "momentum" ? "pace" : "plays"}, ${zoomed ? "zoomed" : range === "All" ? "all time" : `past ${range}`}`}
+                </span>
+              </div>
+            </>
+          )}
           {benchmark && (
             <div
               className="num"
               style={{ fontSize: 12, color: onPace ? "var(--up)" : "var(--down)", fontWeight: 700, marginTop: 2 }}
             >
-              {onPace
-                ? `▲ beating ${benchmark.label} pace — earning`
-                : `▼ behind ${benchmark.label} pace — not earning`}
+              {onPace ? "▲ still climbing" : "▼ cooled off"}
             </div>
           )}
         </div>
@@ -420,24 +536,33 @@ export function StockChart({
           aria-label={
             `${mode === "momentum" ? "Plays per day" : "Total plays"} over time, ` +
             `${fmt(Math.round(firstValue))} to ${fmt(Math.round(values[lastIdx]!))}` +
-            (benchmark ? `, currently ${onPace ? "above" : "below"} expected pace` : "")
+            (benchmark ? `, currently ${onPace ? "climbing" : "cooled off"}` : "")
           }
         >
-          {[yMin, yMax].map((v) => (
-            <g key={v}>
-              <line x1={PAD.l} x2={W - PAD.r} y1={y(v)} y2={y(v)} stroke="var(--border)" strokeWidth="1" />
-              <text x={W - PAD.r + 4} y={y(v) + 4} fontSize="10" fill="var(--text-3)">
-                {fmt(v)}
-              </text>
-            </g>
-          ))}
+          {yTicks.map((v) => {
+            const isBenchmark = mode === "relative" && v === benchmarkValue;
+            return (
+              <g key={v}>
+                <line
+                  x1={PAD.l} x2={W - PAD.r} y1={y(v)} y2={y(v)}
+                  stroke={isBenchmark ? "var(--text-3)" : "var(--border)"}
+                  strokeWidth={isBenchmark ? 1.5 : 1}
+                  strokeDasharray={isBenchmark ? "4 4" : undefined}
+                  opacity={isBenchmark ? 0.85 : 1}
+                />
+                <text x={W - PAD.r + 4} y={y(v) + 4} fontSize="10" fill="var(--text-3)">
+                  {mode === "relative"
+                    ? `${fmtRatio(logScale ? Math.pow(2, v) : v)}×`
+                    : fmt(Math.round(v))}
+                </text>
+              </g>
+            );
+          })}
           <path d={area} fill={dirColor} opacity="0.07" />
-          {/* the tier's expected pace — the line the track is judged against.
-              Only drawn in momentum view, where it's directly comparable to
-              the plotted series (same units: plays/day). */}
-          {mode === "momentum" && idealRates && (
+          {/* cumulative benchmark — a straight diagonal on the log axis */}
+          {idealPlotted && (
             <path
-              d={idealRates
+              d={idealPlotted
                 .map((v, i) => `${i === 0 ? "M" : "L"}${x(data[i]!.t).toFixed(1)},${y(v).toFixed(1)}`)
                 .join(" ")}
               fill="none"
@@ -447,11 +572,9 @@ export function StockChart({
               opacity="0.85"
             />
           )}
-          {mode === "momentum" && idealRates && (
-            <text
-              x={W - PAD.r} y={PAD.t + 8} fontSize="9" fill="var(--text-3)" textAnchor="end"
-            >
-              ╌ expected pace
+          {idealPlotted && (
+            <text x={W - PAD.r} y={PAD.t + 8} fontSize="9" fill="var(--text-3)" textAnchor="end">
+              ╌ your entry
             </text>
           )}
           {segments.length > 0 ? (
@@ -556,16 +679,37 @@ export function StockChart({
       </div>
       <div className="row" style={{ gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
         <span className="sub" style={{ fontSize: 11 }}>View</span>
-        {(["total", "momentum"] as ChartMode[]).map((m) => (
+        {(["total", "momentum", "relative"] as ChartMode[]).map((m) => (
           <button
             key={m}
             className={`chip${mode === m ? " won" : ""}`}
             style={{ cursor: "pointer", background: mode === m ? undefined : "transparent" }}
             onClick={() => setMode(m)}
+            disabled={m === "relative" && !benchmark}
           >
-            {m === "total" ? "total plays" : "momentum"}
+            {m === "total" ? "total plays" : m === "momentum" ? "momentum" : "vs entry"}
           </button>
         ))}
+        {mode === "relative" && (
+          <>
+            <span className="sub" style={{ fontSize: 11, marginLeft: 4 }}>Axis</span>
+            {(["log", "linear"] as RelativeScale[]).map((s) => (
+              <button
+                key={s}
+                className={`chip${relScale === s ? " won" : ""}`}
+                style={{ cursor: "pointer", background: relScale === s ? undefined : "transparent" }}
+                onClick={() => setRelScale(s)}
+                title={
+                  s === "log"
+                    ? "Benchmark centred, equal room above and below"
+                    : "Scaled to the peak; spikes tower, below-pace crowds the floor"
+                }
+              >
+                {s === "log" ? "centred" : "peak"}
+              </button>
+            ))}
+          </>
+        )}
       </div>
       <div className="row" style={{ gap: 4, flexWrap: "wrap" }}>
         <span className="sub" style={{ fontSize: 11 }}>Interval</span>

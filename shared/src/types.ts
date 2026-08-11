@@ -51,6 +51,12 @@ export type PickStatus = "active" | "expired";
 /** "daily" = the everyday pick. "super" = the weekly 5× pick (extra slot). */
 export type PickKind = "daily" | "super";
 
+/**
+ * What kind of run a track had. Every pick starts as "flatline" and can only
+ * ever upgrade — a badge is a status object, so it is never revoked.
+ */
+export type Badge = "flatline" | "riser" | "breakout" | "juggernaut" | "moonshot";
+
 export interface Pick {
   id: number;
   userId: number;
@@ -66,13 +72,26 @@ export interface Pick {
   pickRank: number;
   expiresAt: string;
   status: PickStatus;
+  /** Highest badge this pick has ever reached (upgrade-only). */
+  badge: Badge;
+  /** Score under that badge's own formula — comparable only within the badge. */
+  badgePoints: number;
+  /** When the current badge was first reached. */
+  badgeAt: string | null;
 }
 
 /**
  * "weekly_growth" is legacy (v1 picks may hold old events); new accrual emits
  * "growth". "stall" events carry NEGATIVE points.
  */
-export type ScoreEventType = "milestone" | "weekly_growth" | "early_bird" | "growth" | "stall";
+export type ScoreEventType =
+  | "milestone"
+  | "early_bird"
+  | "badge"
+  /** legacy rows from earlier scoring versions; no longer emitted */
+  | "weekly_growth"
+  | "growth"
+  | "stall";
 
 export interface ScoreEvent {
   id: number;
@@ -97,7 +116,7 @@ export type NotificationType =
   | "milestone_crossed"
   | "weekly_growth_awarded"
   | "early_bird_awarded"
-  | "pick_stalling"
+  | "badge_upgraded"
   | "followed_user_picked"
   | "new_follower";
 

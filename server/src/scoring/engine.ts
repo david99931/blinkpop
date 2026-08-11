@@ -7,11 +7,13 @@
  */
 
 import {
+  ENTRY_MULTIPLE,
   GROWTH,
   MILESTONES,
   ORDER_DECAY,
   SUPER_PICK,
   earlyBirdTierFor,
+  entryMultipleFactor,
   underdogTierFor,
   type PickKind,
   type ScoreEventType,
@@ -80,6 +82,12 @@ export function scorePick(
   const superMult = pick.kind === "super" ? SUPER_PICK.multiplier : 1;
   const tier = underdogTierFor(pick.artistAvgPlays ?? B);
   const multiplier = tier.multiplier * orderDecay(pick.pickRank) * superMult;
+  /**
+   * Entry multiple at the moment an event is earned — how far the track has
+   * run since YOUR baseline, in doublings. Always computed from plays at that
+   * snapshot (never the track's final state) so events never need restating.
+   */
+  const factorAt = (playsNow: number) => entryMultipleFactor(B, playsNow);
   const events: ScoreEventDraft[] = [];
 
   // ── Milestones (§4.3): first in-window snapshot at/above each milestone
@@ -92,7 +100,7 @@ export function scorePick(
       pickId: pick.pickId,
       type: "milestone",
       milestoneValue: m.plays,
-      points: m.basePoints * multiplier,
+      points: m.basePoints * multiplier * factorAt(crossing.plays),
       dedupeKey: `pick:${pick.pickId}:milestone:${m.plays}`,
       occurredAt: crossing.iso,
     });
@@ -101,42 +109,31 @@ export function scorePick(
   // ── Early-bird bonus: picked inside the track's first 100/1k plays AND the
   // call proved out (track crossed its first milestone while live). Pays once.
   const earlyTier = earlyBirdTierFor(B);
-  const firstMilestone = events[0]; // milestones are pushed in ascending order → earliest crossing
-  if (earlyTier && firstMilestone) {
+  const firstCrossing = snaps.find((s) => events.length > 0 && s.iso === events[0]!.occurredAt);
+  if (earlyTier && firstCrossing) {
     events.push({
       pickId: pick.pickId,
       type: "early_bird",
       milestoneValue: null,
-      points: earlyTier.basePoints * multiplier,
+      points: earlyTier.basePoints * multiplier * factorAt(firstCrossing.plays),
       dedupeKey: `pick:${pick.pickId}:early_bird`,
-      occurredAt: firstMilestone.occurredAt,
+      occurredAt: firstCrossing.iso,
     });
   }
 
   // ── Continuous growth accrual (§4.3, PRIMARY source): points proportional
-  // to plays gained — but ONLY over stretches where the track is growing at
-  // least as fast as its tier's ideal pace. Go cold and growth simply stops
-  // paying; nothing already banked is ever taken back.
-  //
-  // The comparison is LOCAL (pace right now vs expected pace at this size),
-  // not cumulative-since-pick: otherwise one early spike would keep a track
-  // "ahead" forever and a long stale stretch would still read as winning.
-  // Plays gained while behind pace are forfeited (the anchor advances), so
-  // they can't bank up and pay out on some later surge.
+  // to plays gained, scaled by the entry multiple at the moment they're
+  // earned. There is no pace "bar": a track that stops growing produces no
+  // gains, so it stops earning on its own, and one that never doubles carries
+  // a factor near zero. Nothing already banked is ever taken back.
   const pointRate = GROWTH.pointsPer1k / 1000;
   let anchorPlays = B;
-  let anchorMs = pickedMs;
   for (const s of snaps) {
-    const days = (s.ms - anchorMs) / DAY_MS;
-    if (days <= 0) continue;
-    const actualPerDay = (s.plays - anchorPlays) / days;
-    const idealPerDay = anchorPlays * tier.idealDailyGrowth;
-    if (actualPerDay < idealPerDay) {
-      anchorPlays = Math.max(anchorPlays, s.plays); // behind pace → forfeited
-      anchorMs = s.ms;
-      continue;
-    }
-    const points = (s.plays - anchorPlays) * pointRate * multiplier;
+    const gained = s.plays - anchorPlays;
+    if (gained <= 0) continue;
+    const factor = factorAt(s.plays);
+    if (factor < ENTRY_MULTIPLE.minFactor) continue; // barely off the baseline yet
+    const points = gained * pointRate * multiplier * factor;
     if (points < GROWTH.minEventPoints) continue; // bank until it's worth an event
     events.push({
       pickId: pick.pickId,
@@ -147,7 +144,6 @@ export function scorePick(
       occurredAt: s.iso,
     });
     anchorPlays = s.plays;
-    anchorMs = s.ms;
   }
 
   return events;

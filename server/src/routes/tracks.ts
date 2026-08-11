@@ -18,6 +18,7 @@ function trackPageExtras(providerTrackId: string): {
     pickedAt: string;
     points: number;
     kind: "daily" | "super";
+    badge: string;
   }[];
 } {
   const db = getDb();
@@ -36,7 +37,7 @@ function trackPageExtras(providerTrackId: string): {
     db
       .prepare(
         `SELECT p.pick_rank, p.kind, u.handle, u.display_name, base.plays AS baseline_plays, p.picked_at,
-                COALESCE((SELECT SUM(e.points) FROM score_events e WHERE e.pick_id = p.id), 0) AS points
+                p.badge_points AS points, p.badge
            FROM picks p
            JOIN users u ON u.id = p.user_id
            JOIN track_snapshots base ON base.id = p.baseline_snapshot_id
@@ -50,6 +51,7 @@ function trackPageExtras(providerTrackId: string): {
       baseline_plays: number | null;
       picked_at: string;
       points: number;
+      badge: string;
     }[]
   ).map((r) => ({
     rank: r.pick_rank,
@@ -59,6 +61,7 @@ function trackPageExtras(providerTrackId: string): {
     baselinePlays: r.baseline_plays,
     pickedAt: r.picked_at,
     points: r.points,
+    badge: r.badge,
   }));
 
   return { sparkline, pickers };

@@ -10,17 +10,6 @@ export interface UnderdogTier {
   multiplier: number;
   /** Short label for UI badges, e.g. "artist <1k — 10× tier". */
   label: string;
-  /**
-   * The tier's IDEAL growth curve: expected daily growth as a fraction of
-   * plays. This is the benchmark a pick is measured against — a track only
-   * earns while it is at or above `baseline × (1 + rate)^days` (§4.3).
-   *
-   * Smaller artists are expected to grow faster in percentage terms, so the
-   * bar is higher for them. These are v1 estimates — recalibrate from real
-   * observed data with `server/scripts/calibrate-ideal.mjs` once enough
-   * snapshot history exists.
-   */
-  idealDailyGrowth: number;
 }
 
 /**
@@ -31,24 +20,111 @@ export interface UnderdogTier {
  * land in the 10× tier. Ordered smallest tier first; first match wins.
  */
 export const UNDERDOG_TIERS: readonly UnderdogTier[] = [
-  { maxPlaysExclusive: 1_000, multiplier: 10.0, label: "artist <1k", idealDailyGrowth: 0.04 },
-  { maxPlaysExclusive: 10_000, multiplier: 5.0, label: "artist <10k", idealDailyGrowth: 0.025 },
-  { maxPlaysExclusive: 50_000, multiplier: 2.5, label: "artist <50k", idealDailyGrowth: 0.015 },
-  { maxPlaysExclusive: 250_000, multiplier: 1.0, label: "artist <250k", idealDailyGrowth: 0.01 },
-  { maxPlaysExclusive: 1_000_000, multiplier: 0.3, label: "artist <1M", idealDailyGrowth: 0.006 },
+  { maxPlaysExclusive: 1_000, multiplier: 10.0, label: "artist <1k" },
+  { maxPlaysExclusive: 10_000, multiplier: 5.0, label: "artist <10k" },
+  { maxPlaysExclusive: 50_000, multiplier: 2.5, label: "artist <50k" },
+  { maxPlaysExclusive: 250_000, multiplier: 1.0, label: "artist <250k" },
+  { maxPlaysExclusive: 1_000_000, multiplier: 0.3, label: "artist <1M" },
 ];
 
 /** Artist average at or above the last tier boundary. */
-export const UNDERDOG_FLOOR = {
-  multiplier: 0.05,
-  label: "artist 1M+",
-  idealDailyGrowth: 0.003,
+export const UNDERDOG_FLOOR = { multiplier: 0.05, label: "artist 1M+" } as const;
+
+/**
+ * ── Badges (v4) ─────────────────────────────────────────────────────────
+ *
+ * A pick is classified by the SHAPE of its track's run, then scored by that
+ * badge's own formula. Scores are comparable only WITHIN a badge — a
+ * Juggernaut never has to out-score a Moonshot, which is what let the two
+ * live under one roof at last.
+ *
+ * Ordered weakest → strongest; a badge may only ever move up this list.
+ */
+export const BADGE_ORDER = ["flatline", "riser", "breakout", "juggernaut", "moonshot"] as const;
+
+export const BADGE_META: Record<
+  (typeof BADGE_ORDER)[number],
+  { label: string; blurb: string; icon: string }
+> = {
+  flatline: { label: "Flatline", icon: "▁", blurb: "Went nowhere. Where every pick starts." },
+  riser: { label: "Riser", icon: "📈", blurb: "Steady, sustained climb." },
+  breakout: { label: "Breakout", icon: "⚡", blurb: "One viral burst, then it settled." },
+  juggernaut: { label: "Juggernaut", icon: "🏛", blurb: "Already big, and added a huge audience." },
+  moonshot: { label: "Moonshot", icon: "🚀", blurb: "Ran away from where you found it." },
+};
+
+/**
+ * Classification thresholds, checked in this order — first match wins.
+ * Tuned against the simulator's own archetypes (see the cross-tab in
+ * `server/test/badges.test.ts`): recovers 10/10 moonshots, 37/40 spikes,
+ * 49/50 risers and 310/350 flatliners.
+ */
+export const BADGE_RULES = {
+  /** A single 7-day window carried this share of the whole gain. */
+  breakoutBurstShare: 0.5,
+  breakoutMinDoublings: 2,
+  breakoutMinGained: 5_000,
+  moonshotMinDoublings: 8,
+  /** Juggernaut is about ABSOLUTE reach from an already-large base. */
+  juggernautMinBaseline: 250_000,
+  juggernautMinGained: 250_000,
+  juggernautMaxDoublings: 3,
+  riserMinDoublings: 1,
+  riserMinGained: 2_000,
 } as const;
 
-/** Plays the tier's ideal curve expects `days` after a baseline of `basePlays`. */
-export function idealPlaysAt(basePlays: number, idealDailyGrowth: number, days: number): number {
-  if (days <= 0) return basePlays;
-  return basePlays * Math.pow(1 + idealDailyGrowth, days);
+/**
+ * Per-badge scoring weights over the shared trajectory signals:
+ *   G = plays gained since baseline   D = doublings since baseline
+ *   P = best 7-day gain ÷ baseline    S = share of window still growing
+ *
+ * `useArtistTier: false` on Juggernaut is deliberate — every holder is a
+ * big-artist picker by construction, so the tier stops discriminating and
+ * only shrinks that one leaderboard. Order decay and super still apply.
+ */
+export const BADGE_SCORING = {
+  flatline: { perGainK: 0.1, perDoubling: 0, doublingSq: 0, perBurst: 0, sustain: false, useArtistTier: true },
+  riser: { perGainK: 20, perDoubling: 200, doublingSq: 0, perBurst: 0, sustain: true, useArtistTier: true },
+  breakout: { perGainK: 3, perDoubling: 0, doublingSq: 0, perBurst: 800, sustain: false, useArtistTier: true },
+  juggernaut: { perGainK: 4, perDoubling: 200, doublingSq: 0, perBurst: 0, sustain: false, useArtistTier: false },
+  moonshot: { perGainK: 1, perDoubling: 0, doublingSq: 120, perBurst: 0, sustain: false, useArtistTier: true },
+} as const;
+
+/**
+ * Entry multiple (v3) — how much of the run you actually called.
+ *
+ * Every score event is scaled by how many times the track has DOUBLED since
+ * your baseline, at the moment the event is earned:
+ *
+ *     factor = log2(playsNow / baseline) / neutralDoublings
+ *
+ * This replaced the per-tier "ideal growth rate" bar, which turned out to be
+ * measuring track AGE rather than performance: a track's growth as a
+ * percentage of its own plays is ≈ 1/age, so real (old) tracks could never
+ * clear any fixed percentage bar while brand-new ones cleared it trivially.
+ * Live SoundCloud sampling put real tracks at ~0.1%/day against bars we had
+ * set at 0.3–4%/day. See `server/scripts/calibrate-ideal.mjs`.
+ *
+ * Doublings are age-independent and measure the thing the game is actually
+ * about: how far a track ran AFTER you called it. A dead track produces no
+ * doublings, so it earns nothing — which is the job the bar was there to do.
+ *
+ * The factor is computed from plays at the time of each event, never from the
+ * track's final state, so score events stay append-only and settlement stays
+ * idempotent (see `dedupe_key`).
+ */
+export const ENTRY_MULTIPLE = {
+  /** Doublings that equal a 1.0× factor. 1 = "your multiplier is how many times it doubled". */
+  neutralDoublings: 1,
+  /** Below this many doublings an event isn't worth emitting. */
+  minFactor: 0.02,
+} as const;
+
+/** Scale factor for an event earned when the track sits at `playsNow`. */
+export function entryMultipleFactor(basePlays: number, playsNow: number): number {
+  const base = Math.max(1, basePlays);
+  if (playsNow <= base) return 0;
+  return Math.log2(playsNow / base) / ENTRY_MULTIPLE.neutralDoublings;
 }
 
 export interface Milestone {
@@ -120,12 +196,6 @@ export function earlyBirdTierFor(
  */
 export const SUPER_PICK = { multiplier: 5, perWeek: 1 } as const;
 
-/**
- * How far below its ideal curve a track has to fall before the UI calls it
- * "behind pace". Purely a display threshold — scoring gates strictly at the
- * curve (below it, growth simply stops paying).
- */
-export const BEHIND_PACE_RATIO = 0.9;
 
 /**
  * Tier lookup used by both the scoring engine and UI badges.
@@ -135,7 +205,7 @@ export const BEHIND_PACE_RATIO = 0.9;
  */
 export function underdogTierFor(
   artistAvgPlays: number,
-): { multiplier: number; label: string; idealDailyGrowth: number } {
+): { multiplier: number; label: string } {
   for (const t of UNDERDOG_TIERS) {
     if (artistAvgPlays < t.maxPlaysExclusive) return t;
   }

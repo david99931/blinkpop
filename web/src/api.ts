@@ -63,8 +63,6 @@ export interface UserInfo {
 export interface Tier {
   multiplier: number;
   label: string;
-  /** Expected daily growth for this tier — the benchmark curve. */
-  idealDailyGrowth: number;
 }
 
 export interface SearchResult {
@@ -103,11 +101,25 @@ export interface TrackPageData {
     pickedAt: string;
     points: number;
     kind: "daily" | "super";
+    badge: Badge;
   }[];
 }
 
+export type Badge = "flatline" | "riser" | "breakout" | "juggernaut" | "moonshot";
+
+export const BADGE_META: Record<Badge, { label: string; icon: string; blurb: string }> = {
+  flatline: { label: "Flatline", icon: "▁", blurb: "Went nowhere. Where every pick starts." },
+  riser: { label: "Riser", icon: "📈", blurb: "Steady, sustained climb." },
+  breakout: { label: "Breakout", icon: "⚡", blurb: "One viral burst, then it settled." },
+  juggernaut: { label: "Juggernaut", icon: "🏛", blurb: "Already big, and added a huge audience." },
+  moonshot: { label: "Moonshot", icon: "🚀", blurb: "Ran away from where you found it." },
+};
+export const BADGE_ORDER: Badge[] = ["moonshot", "juggernaut", "breakout", "riser", "flatline"];
+
 export interface PickView {
   id: number;
+  badge: Badge;
+  badgeAt: string | null;
   pickedAt: string;
   pickDate: string;
   pickRank: number;
@@ -117,6 +129,8 @@ export interface PickView {
   artistName: string;
   providerTrackId: string;
   baselinePlays: number | null;
+  /** Artist popularity at pick time — the tier THIS pick is scored against. */
+  artistAvgPlays: number | null;
   currentPlays: number | null;
   points: number;
   tierLabel: string | null;
@@ -132,6 +146,8 @@ export interface MyPicks {
 
 export interface PortfolioData {
   user: { handle: string; displayName: string; createdAt: string };
+  shelf: Record<Badge, number>;
+  bestBadge: Badge;
   totalPoints: number;
   currentStreak: number;
   longestStreak: number;
@@ -152,7 +168,8 @@ export interface FeedItem {
   baselinePlays?: number | null;
   tierLabel?: string | null;
   superPick?: boolean;
-  eventType?: "milestone" | "weekly_growth" | "early_bird" | "stall";
+  eventType?: "milestone" | "early_bird" | "badge" | "weekly_growth" | "growth" | "stall";
+  badge?: Badge;
   milestoneValue?: number | null;
   points?: number;
 }

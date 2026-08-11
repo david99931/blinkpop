@@ -29,6 +29,23 @@ Handoff document for Claude Code. Read this fully before writing code. Decisions
 > behind costs the earnings you'd have made, nothing you already banked.
 > Charts colour **per segment** against that pace — green where the track is
 > beating it, red where it went cold.
+>
+> **v3.0 (2026-08-10):** the per-tier growth **bar is removed**. Live
+> SoundCloud sampling showed a track's growth as a percentage of its own
+> plays is ≈ 1/age, so a percentage bar was measuring how OLD a track is, not
+> how well it is doing — real tracks sit near 0.1%/day against bars we had set
+> at 0.3–4%/day. Replaced by the **entry multiple** (§4.3): every event is
+> scaled by how many times the track has doubled since your baseline, measured
+> when the event is earned. §4.6 numbers all change.
+>
+> **v4.0 (2026-08-10):** the product pivots from one global score to
+> **badges** (§4.10). A pick is classified by the SHAPE of the run it
+> captured — Flatline / Riser / Breakout / Juggernaut / Moonshot — and scored
+> by that badge's own formula, so scores compare only WITHIN a badge. This
+> dissolves the balancing problem that dogged v1–v3: a "safe pick" no longer
+> has to out-score a moonshot, it just has to be a good Juggernaut. Badges are
+> upgrade-only. `score_events` stops being a ledger and becomes a moment log.
+
 
 ---
 
@@ -123,68 +140,48 @@ of `A`.
 Artist identity: provider-scoped (mock: exact artist name; SoundCloud: the
 user id behind the track).
 
-### 4.3 Continuous growth accrual, gated on the ideal curve (primary source)
+### 4.3 Growth accrual × entry multiple (primary point source, v3)
 
 Points accrue **proportionally to plays gained**, settled every couple of
-hours (each snapshot pass), so a portfolio moves through the day like a stock
-ticker instead of jumping at milestones:
+hours, and each event is scaled by the **entry multiple** — how far the track
+has run past YOUR baseline at the moment the event lands:
 
 ```
-points = plays gained × (1 / 1,000) × underdog(A) × orderDecay(rank) × super
+factor = log2(playsNow / baselinePlays) / neutralDoublings      (neutral = 1)
+points = plays gained × (1/1,000) × underdog(A) × orderDecay(rank) × super × factor
 ```
 
-**…but only while the track is keeping its tier's expected pace (v2.2).**
-Every tier carries an `idealDailyGrowth` — the growth rate a typical track by
-an artist that size actually manages:
+In plain terms: **your multiplier is how many times the song has doubled since
+you called it.** Milestone and early-bird bonuses take the same factor.
 
-```
-tier            ideal/day
-artist <1k        4.0%
-artist <10k       2.5%
-artist <50k       1.5%
-artist <250k      1.0%
-artist <1M        0.6%
-artist 1M+        0.3%
-```
-
-Smaller artists are held to a higher bar, because small tracks that are going
-anywhere grow fast in percentage terms. Recalibrate these from observed data
-with `server/scripts/calibrate-ideal.mjs` (use the **median** per tier — a
-mean is dragged up by moonshots until nothing can beat the benchmark).
+Why this replaced the per-tier growth "bar" (v2.2):
+- A bar expressed as *percent of current plays* is arithmetically ≈ **1/age**.
+  A track with P plays over D days gains P/D per day, which as a fraction of P
+  is exactly 1/D. It measures the calendar, not the song.
+- Live sampling of 418 real SoundCloud tracks confirmed it: observed medians
+  landed within a rounding error of 1/age in four of six tiers, and sat around
+  **0.1%/day** — far under every bar we had proposed. Real (old) tracks could
+  never clear one; brand-new tracks cleared it trivially. See
+  `server/scripts/calibrate-ideal.mjs`.
+- Doublings are age-independent and measure the thing the game is about: how
+  much of the run happened **after** you called it.
 
 Mechanics:
-- At each snapshot, compare **local pace** (plays gained per day since the
-  last award) against **expected pace** (`plays × idealDailyGrowth`). At or
-  above → the gain pays. Below → it pays nothing and the plays are
-  **forfeited**, so they cannot bank up and cash out on a later surge.
-- The comparison is deliberately *local*, not cumulative-since-pick: with a
-  cumulative test, one early spike keeps a track "ahead" forever and months
-  of stagnation still read as winning.
-- **Nothing is ever taken back.** Falling behind costs opportunity, not
-  banked points. There are no negative score events anywhere in the engine —
-  picks are immutable, so a user watching a decline cannot sell, and clawing
-  back earnings would be punishment without agency.
-- Emitted as `growth` score events; tiny gains **bank** until they are worth
-  ≥ 1 point (no dust events). Settlement stays idempotent via `dedupe_key`:
-  for a given snapshot history the result is always identical. Note that
-  sampling cadence affects *granularity* — denser snapshots judge pace more
-  strictly, never more generously.
+- **A dead track earns nothing without needing a bar.** No growth → no gains
+  to pay on, and a track that never passes your baseline has factor 0.
+- **Nothing is ever taken back.** No negative score events exist anywhere.
+- The factor uses plays **at that snapshot**, never the track's final state,
+  so events are append-only and settlement stays idempotent via `dedupe_key`.
+  A rules change therefore needs a migration to clear old rows (they are not
+  restated by `INSERT OR IGNORE`) — see `008_entry_multiple.sql` and
+  `POST /api/dev/resettle`.
+- Gains bank until worth ≥ 1 point, so tiny tracks don't spray dust events.
 - Only accrues inside the 180-day live window.
-- Growth events are silent: no notifications, hidden from the feed (the drip
-  would drown it). Milestone/early-bird moments carry the fanfare.
+- Growth events are silent: no notifications, hidden from the feed.
 
-UI: charts colour **each portion of the line** by that same comparison —
-green where the track is beating its tier's pace, red where it went cold —
-and the momentum view (plays/day) plots the expected-pace line as a dashed
-reference you can read the crossing against directly.
-
-`orderDecay(rank)` — rank is the user's position among all users who picked T (1 = first):
-
-```
-orderDecay(rank) = max(0.25, 0.9 ^ (rank − 1))
-```
-
-First picker gets 1.0, second 0.9, third 0.81 … floor at 0.25.
+Consequence worth knowing: earning is now **front-loaded against latecomers**
+rather than gated. Catching a track at 600 that reaches 5M banks ~13 doublings;
+joining the same track at 500k banks ~3.3. Same destination, ~5× the score.
 
 ### 4.4 Milestone bonuses (secondary, v2 — was the primary source in v1)
 
@@ -211,55 +208,87 @@ Reposts/likes velocity as an "early heat" bonus. Leave columns in snapshots for 
 ### 4.6 Worked examples (use as unit-test fixtures)
 
 Each story artist below has exactly one track, so `A = B` at pick time.
-Numbers are v2 (growth accrual + milestone bonuses).
+Numbers are **v3** (growth × entry multiple, milestone/early-bird bonuses) and
+are pinned in `server/test/scoring.test.ts`.
 
-1. **The dream call:** picked at B = 600 plays, artist averaging 600 (underdog 10.0), first picker (decay 1.0). Track runs to 1.2M in 90 days. Growth: (1,200,000 − 600)/1000 × 10 ≈ **11,994 pts**, accruing continuously. Milestone bonuses: all 7 from 10k→1M → (10+15+25+40+75+125+250) × 10 = **5,400 pts**. Early bird (< 1k): +200. Total ≈ **17,594 pts**.
-2. **Late to the party:** same track, picked when it (and the artist's average) sits at 300,000 (underdog 0.3), 14th picker (decay 0.9^13 ≈ 0.254). Milestone bonuses 500k + 1M → (125+250) × 0.3 × 0.254 ≈ **29 pts**, plus growth ≈ (900k/1000) × 0.3 × 0.254 ≈ 69 pts.
-3. **The flatline:** picked at B = 2,000, track drifts to ~6,200. No milestone, no bonuses — just a growth drip of ≈ **21 pts**. Noise. Rarity of BIG numbers is the product; near-zero is still the common outcome.
-4. **Big-artist pick:** picked at B = 4M, artist averaging 4M (underdog 0.05), runs to 10M: growth 6,000 × 0.05 = **300 pts** + milestone bonuses (650+1000) × 0.05 = **82.5** → ≈ 382.5 total. A mega-hit run still earns a fraction of one true early call (≈ 46× less). Verify this ratio holds in tests; it is the core balance invariant.
-5. **The exploit that must stay dead (v1.1):** a 600-play track that runs to 1.2M — but by an artist averaging 4M plays. Underdog(A) = 0.05 applies to growth AND bonuses → ~627 pts total, not ~17.6k. New single ≠ new artist.
-
-### 4.7 Early-bird bonus (v1.2)
-
-Reward for being among a track's **first listeners** — the incentive to be in the
-first 100 or first 1,000 plays:
-
-```
-earlyBird(B):
-  B < 100    → 50 base points  ("first 100")
-  B < 1,000  → 20 base points  ("first 1k")
-  else       → no bonus
-```
-
-Paid **once per pick**, as its own score event (`early_bird`), and **only when
-the track crosses its first milestone** while the pick is live — never at pick
-time. This is deliberate: an instant bonus would reward shotgunning any
-50-play track daily; gating it on the first milestone means the bonus only
-lands when the early call actually proved out.
-
-`points = earlyBird(B) × underdog(A) × orderDecay(rank) × super(5× if super pick)`
-
-Dedupe key: `pick:{id}:early_bird`.
-
-### 4.8 Weekly super pick (v1.2)
-
-One per user per user-local ISO week (game rule 9). Every score event the pick
-earns — milestones, weekly growth, early bird — is multiplied by **5**. The UI
-must make spending it feel weighty (it's the week's one big swing); the
-confirmation modal states that it does not consume the daily pick.
-
-Worked example: the §4.6 dream call made as a super pick = 5,400 × 5 =
-**27,000 milestone pts** (plus the early-bird bonus, also ×5).
-
-### 4.9 Stall decay — REMOVED in v2.2
-
-v2.1 briefly let picks bleed points while a track went cold. It is gone:
-picks can no longer lose points at all. The §4.3 ideal-curve gate replaces
-it — a cold track simply stops earning, which costs the player the upside
-without clawing back anything they banked. Migration `007_drop_stall.sql`
-purges the old negative events so historical totals match current rules.
+1. **The dream call:** B = 600, artist averaging 600 (underdog 10.0), first picker. Track runs to 1.2M in 90 days — about **11 doublings**. Growth ≈ **121,058**, milestone bonuses (all 7 rungs, each scaled by the doublings reached when it crossed) ≈ **53,874**, early bird ≈ **1,329**. Total ≈ **176,261 pts**.
+2. **Late to the party:** same track picked at 300,000 (underdog 0.3), 14th picker (decay 0.9^13). Only ~1.9 doublings left to catch → milestones ≈ **43**, total ≈ **140 pts**. Roughly 1,260× less than the early caller.
+3. **The flatline:** B = 2,000 drifting to 6,200 — ~1.6 doublings, no milestone, no bonus. ≈ **26 pts**. Noise; rarity is still the product.
+4. **Big-artist pick:** B = 4M, artist averaging 4M (underdog 0.05), runs to 10M — barely over one doubling. Milestones ≈ **77**, total ≈ **422 pts**. The core balance invariant (early call ≫ mega-hit) now holds at ≈ **418:1**.
+5. **The exploit that must stay dead:** a 600-play track that runs to 1.2M but belongs to an artist averaging 4M. Underdog 0.05 applies to everything → ≈ **881 pts**, exactly 1/200th of example 1. New single ≠ new artist.
+6. **Super pick:** example 1 taken as the weekly super → ≈ **881,305 pts** (5× everything).
 
 Scoring must be implemented as a **pure, deterministic function** of (pick, snapshot history, competing picks) → score events. No side effects inside scoring. The batch job feeds it data and persists the resulting events. Recomputing from scratch must always give the same result (idempotent settlement).
+
+---
+
+### 4.10 Badges (v4) — the scoring model
+
+Points alone made every trajectory compete on one axis, which forced an
+unwinnable trade: any tuning that made a late-entry "safe pick" worth having
+also inflated megastar picks, and any tuning that protected discovery made
+safe picks worthless. Badges remove the competition instead of re-balancing
+it.
+
+**Classification.** From the snapshot history *since your baseline*, compute
+four signals — `G` plays gained, `D` doublings, `P` best 7-day gain ÷
+baseline, `S` share of the window still growing — then take the first match:
+
+| badge | earns it |
+|---|---|
+| **Breakout** ⚡ | one 7-day window carried ≥50% of the gain, ≥2 doublings, ≥5k plays |
+| **Moonshot** 🚀 | ≥8 doublings (256×) since your entry |
+| **Juggernaut** 🏛 | baseline ≥250k, gained ≥250k, <3 doublings — already big, added real reach |
+| **Riser** 📈 | ≥1 doubling and ≥2k plays gained |
+| **Flatline** ▁ | everything else; where every pick starts |
+
+**The badge is judged from YOUR entry, not the track's whole life.** This is
+the single most important consequence: the same track can hand different
+badges to different pickers. Cold Water gave ava (in at 600) a Moonshot and
+hana (in at 311k) a Juggernaut — two honest descriptions of two different
+calls, which never appear on the same leaderboard.
+
+**Scoring.** Each badge weights the same signals differently, over the shared
+multiplier `M = artistTier × orderDecay(rank) × super`:
+
+```
+Flatline    M × G/1000 × 0.1
+Riser       M × (D×200 + G/1000×20) × (0.5 + S)
+Breakout    M × (log2(1+P)×800 + G/1000×3)
+Juggernaut      (G/1000×4 + D×200)      ← artist tier deliberately omitted
+Moonshot    M × (D²×120 + G/1000)
+```
+
+Juggernaut skips the artist tier because every holder is a big-artist picker
+by construction — the tier stops discriminating between them and only shrinks
+that one board. Order decay and super still apply, so being *first* to call it
+still matters. **[OPEN]** a later version may benchmark a Juggernaut against
+the artist's own catalogue ("is this one of *their* big ones?") rather than
+the field.
+
+**Upgrade-only.** A badge may only move up the order
+`flatline < riser < breakout < juggernaut < moonshot`. A status object is
+never revoked, so a track cooling off can't take a badge back.
+
+**Architectural consequence.** `badge_points` is a DERIVED value on the pick,
+recomputed from full snapshot history each settlement — the per-badge formulas
+are whole-trajectory functions (peak burst, sustain) with nothing to accrue
+incrementally. Idempotency becomes structural rather than earned: the same
+history always yields the same verdict. `score_events` is therefore no longer
+a ledger; it is a **moment log** (milestone crossed, early bird, badge
+upgraded) for the feed and inbox, deduped by `dedupe_key` so each moment is
+announced once, with `points` written as 0 and summed nowhere.
+
+**Validation.** The classifier is cross-tabbed against the simulator's own
+archetype labels (`server/test/badges.test.ts`): it recovers 10/10 true
+moonshots, 36/40 spikes → Breakout, 306/350 flatliners → Flatline. Risers land
+in Riser *or* Moonshot — correct, since a track compounding 20–60%/week for
+180 days genuinely passes 256×; the generator's label is a growth pattern,
+the badge is an outcome.
+
+**[OPEN] parked for later:** slow-burn as an evolution/combo badge (dormant →
+Riser → "Sleeper"), hybrid attributes on Juggernaut, and whether a global
+cross-badge score exists at all — the badge shelf may replace it entirely.
 
 ---
 

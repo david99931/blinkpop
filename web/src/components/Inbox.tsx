@@ -6,11 +6,13 @@ function line(n: NotificationsData["notifications"][number]): string {
   const p = n.payload;
   switch (n.type) {
     case "milestone_crossed":
-      return `${p.title} crossed ${fmt(p.milestoneValue as number)} plays 🚀 +${fmtPts(p.points as number)} pts`;
+      return `${p.title} crossed ${fmt(p.milestoneValue as number)} plays 🚀`;
     case "weekly_growth_awarded":
       return `${p.title} had a breakout week 📈 +${fmtPts(p.points as number)} pts`;
     case "early_bird_awarded":
-      return `Early-bird bonus on ${p.title} 🐦 +${fmtPts(p.points as number)} pts — you were in before the crowd`;
+      return `Early bird on ${p.title} 🐦 — you were in before the crowd`;
+    case "badge_upgraded":
+      return `${p.title} upgraded to ${p.icon} ${p.badgeLabel} — a new badge for your shelf`;
     case "followed_user_picked":
       return `@${p.pickerHandle} locked in ${p.kind === "super" ? "a ⚡ super pick: " : ""}${p.title} — ${fmt(p.baselinePlays as number | null)} plays`;
     case "new_follower":

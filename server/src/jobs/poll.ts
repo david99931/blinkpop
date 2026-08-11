@@ -70,7 +70,7 @@ async function pollAndSettle(rows: TrackedRow[], log: FastifyBaseLogger): Promis
   );
   const settled = settleDay(0);
   log.info(
-    `polled ${ok}/${rows.length} tracks; +${settled.eventsInserted} score events (${settled.pointsAwarded} pts)`,
+    `polled ${ok}/${rows.length} tracks; ${settled.badgesUpgraded} badge upgrades, ${settled.momentsLogged} moments`,
   );
 }
 

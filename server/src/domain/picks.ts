@@ -43,6 +43,9 @@ interface PickRow {
   pick_rank: number;
   expires_at: string;
   status: "active" | "expired";
+  badge: import("@firstfan/shared").Badge;
+  badge_points: number;
+  badge_at: string | null;
 }
 
 function toPick(r: PickRow): Pick {
@@ -58,6 +61,9 @@ function toPick(r: PickRow): Pick {
     pickRank: r.pick_rank,
     expiresAt: r.expires_at,
     status: r.status,
+    badge: r.badge ?? "flatline",
+    badgePoints: r.badge_points ?? 0,
+    badgeAt: r.badge_at ?? null,
   };
 }
 
@@ -220,10 +226,13 @@ export async function makePick(
 }
 
 export interface PickView extends Pick {
+  /** Score under this pick's badge — comparable only within that badge. */
   title: string;
   artistName: string;
   providerTrackId: string;
   baselinePlays: number | null;
+  /** Artist popularity captured AT PICK TIME — the tier this pick is scored against. */
+  artistAvgPlays: number | null;
   currentPlays: number | null;
   points: number;
   tierLabel: string | null;
@@ -238,7 +247,7 @@ export function listPicksForUser(userId: number): PickView[] {
               base.plays AS baseline_plays,
               (SELECT s.plays FROM track_snapshots s
                 WHERE s.track_id = p.track_id ORDER BY s.captured_at DESC, s.id DESC LIMIT 1) AS current_plays,
-              COALESCE((SELECT SUM(e.points) FROM score_events e WHERE e.pick_id = p.id), 0) AS points
+              p.badge, p.badge_points, p.badge_at
          FROM picks p
          JOIN tracks t ON t.id = p.track_id
          JOIN track_snapshots base ON base.id = p.baseline_snapshot_id
@@ -253,7 +262,9 @@ export function listPicksForUser(userId: number): PickView[] {
     artist_avg_plays: number | null;
     baseline_plays: number | null;
     current_plays: number | null;
-    points: number;
+    badge: import("@firstfan/shared").Badge;
+    badge_points: number;
+    badge_at: string | null;
   })[]).map((r) => {
     const tierInput = r.artist_avg_plays ?? r.baseline_plays;
     return {
@@ -262,8 +273,9 @@ export function listPicksForUser(userId: number): PickView[] {
       artistName: r.artist_name,
       providerTrackId: r.provider_track_id,
       baselinePlays: r.baseline_plays,
+      artistAvgPlays: r.artist_avg_plays,
       currentPlays: r.current_plays,
-      points: r.points,
+      points: r.badge_points,
       tierLabel: tierInput === null ? null : underdogTierFor(tierInput).label,
     };
   });
