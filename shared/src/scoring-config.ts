@@ -110,15 +110,30 @@ export const AFFINITY = {
   /**
    * Doublings that count as a full-strength Moonshot signal.
    *
-   * ⚠ CALIBRATION GAP: 502 live SoundCloud tracks sampled 2026-08-10 project
-   * a MAXIMUM of 2.78 doublings over a 180-day window (p50 0.38, p90 1.77,
-   * p99 2.63) — none reached 4. At 8 this badge is unreachable on real data.
-   * The figure is tuned to the simulator, whose growth archetypes are far
-   * more explosive than reality. Two caveats before lowering it: the sample
-   * projects from LIFETIME average rate (understating a track that is going
-   * viral right now), and search results skew to established tracks rather
-   * than the small ones this game is about. The real fix is months of live
-   * polling on actually-picked tracks, not another sample.
+   * KEEP AT 8 — this survived a real measurement, having nearly been lowered
+   * on a bad one.
+   *
+   * The earlier warning here said 8 was "unreachable on real data", based on
+   * 502 live SoundCloud tracks whose lifetime average rate PROJECTED a maximum
+   * of 2.78 doublings/180d. That method was the flaw: extrapolating a lifetime
+   * average smooths away the burst it is trying to detect, so it cannot
+   * produce a large number no matter how explosive the track.
+   *
+   * Measured properly on 40 Chartmetric tracks with real dated Spotify points
+   * (2026-08-11, `npm run cm:spotify`): p50 0.43, p90 7.20, p99 10.09, max
+   * 10.09 — 3 of 40 reached 8 or more. Tracks DO double eight times in 180
+   * days; they just have to be new releases breaking out, e.g. 57,616 →
+   * 62,625,148 streams.
+   *
+   * The distribution is bimodal, which is the more useful finding: established
+   * catalogue sits near 0.1 doublings while breaking releases sit at 3–10,
+   * with almost nothing between. Flatline and Moonshot are genuinely separate
+   * populations rather than two cuts on one continuum — the archetype model is
+   * measuring something real.
+   *
+   * Still open: this is Spotify, sampled from the top of the catalogue. What
+   * it does NOT establish is how often a *picked SoundCloud track* gets there,
+   * which only the corpus can answer.
    */
   moonshotDoublings: 8,
   /**

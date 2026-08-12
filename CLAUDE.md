@@ -19,7 +19,19 @@ SoundCloud exposes only a track's CURRENT play count — there is no history end
 - `npm run corpus:report` — distributions + badge mix using the real classifier
 Seeded 2,000 tracks on 2026-08-10. **Poll daily** (Task Scheduler); useful signal ~14 days, real calibration ~60–90.
 
-Known gap: current badge thresholds are tuned to the SIMULATOR, which is far more explosive than reality — 502 sampled live tracks projected max 2.78 doublings/180d where Moonshot asks 8. See the calibration note on `AFFINITY.moonshotDoublings`. Badges are upgrade-only, so thresholds can safely be LOOSENED later but never tightened without breaking the never-revoke promise.
+Known gap: badge thresholds are tuned to the SIMULATOR and still need real-data confirmation. Badges are upgrade-only, so thresholds can safely be LOOSENED later but never tightened without breaking the never-revoke promise.
+
+Moonshot's threshold of 8 doublings was measured and **held** — see the note on `AFFINITY.moonshotDoublings`. An earlier claim that 8 was unreachable came from extrapolating lifetime average growth, which structurally cannot show a burst; real dated Spotify series show p90 7.20 / max 10.09 over 180 days. What remains uncalibrated is the *rate* at which picked tracks earn each badge, which only the corpus can measure.
+
+## Chartmetric (`server/scripts/chartmetric.ts`)
+Evaluated 2026-08-11 (~$2 of credits) as a way to skip the corpus wait. **It cannot replace the corpus**, for measured reasons:
+- **SoundCloud**: the endpoint exists and works (`/api/track/{id}/soundcloud/stats/most-history?type=plays`) but coverage is ~2.5% — 1 of 40 top-of-catalogue commercial tracks had any data. For UGC it is effectively zero. There is also no SoundCloud→CM id resolution (`/api/track/{type}/{id}/get-ids` accepts chartmetric/isrc/spotify/itunes/tiktok/genius only), and free-text search on UGC titles returns false positives — two different tracks resolved to the same CM id on a shared surname.
+- **Apple Music**: not available for track stats at any price. The API's 400 enumerates `[shazam, spotify, youtube, tiktok, genius, soundcloud, chartmetric, line, melon, radio]`. Apple Music appears only in playlist/chart endpoints. Relevant if Apple Music integration is ever planned — the stats provider would have to be someone else.
+- **Spotify**: excellent — 40/40 tracks, 180 days of real dated points. This is what produced the Moonshot measurement.
+
+Commands: `npm run cm:probe` (SoundCloud coverage), `cm:spotify`, `cm:sc`, `cm:apple`.
+
+Two hard-won gotchas: endpoint paths must come from `apidocs.chartmetric.com/llms-full.txt`, NOT the third-party api-evangelist OpenAPI spec, whose track-stats path is missing the `{mode}` segment and 404s. And when a parameter is rejected, the 400 body ENUMERATES the valid values — sending a deliberately wrong one is the cheapest way to discover an undocumented enum. Billing is usage-based at $0.01/credit; every call goes through one `spend()` cap so a loop bug can't overrun.
 
 ## Commands (run from repo root)
 - `npm run dev` — API server (port 3001)

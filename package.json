@@ -15,7 +15,11 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "corpus:seed": "npm exec --workspace server -- tsx scripts/corpus.ts seed",
     "corpus:poll": "npm exec --workspace server -- tsx scripts/corpus.ts poll",
-    "corpus:report": "npm exec --workspace server -- tsx scripts/corpus.ts report"
+    "corpus:report": "npm exec --workspace server -- tsx scripts/corpus.ts report",
+    "cm:probe": "npm exec --workspace server -- tsx scripts/chartmetric.ts probe",
+    "cm:spotify": "npm exec --workspace server -- tsx scripts/chartmetric.ts spotify",
+    "cm:apple": "npm exec --workspace server -- tsx scripts/chartmetric.ts applemusic",
+    "cm:sc": "npm exec --workspace server -- tsx scripts/chartmetric.ts soundcloud"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,
