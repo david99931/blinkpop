@@ -20,7 +20,9 @@
     "cm:spotify": "npm exec --workspace server -- tsx scripts/chartmetric.ts spotify",
     "cm:apple": "npm exec --workspace server -- tsx scripts/chartmetric.ts applemusic",
     "cm:sc": "npm exec --workspace server -- tsx scripts/chartmetric.ts soundcloud",
-    "cm:analyze": "npm exec --workspace server -- tsx scripts/chartmetric.ts analyze"
+    "cm:analyze": "npm exec --workspace server -- tsx scripts/chartmetric.ts analyze",
+    "sustain:diff": "npm exec --workspace server -- tsx scripts/sustain-diff.ts",
+    "examples": "npm exec --workspace server -- tsx scripts/worked-examples.ts"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,

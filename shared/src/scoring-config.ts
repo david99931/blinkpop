@@ -159,23 +159,37 @@ export const AFFINITY = {
   breakoutFull: 0.7,
   breakoutDoublings: 2,
   /**
-   * ⚠ THIS PARAMETER CURRENTLY DOES NOTHING. Measured sustain on real daily
-   * series: p10 0.80 · p50 0.91 · p90 0.95 · max 0.98 — 95% of tracks clear
-   * 0.6, so `clamp01(sustain / riserSustain)` is pinned at 1.0 and the Riser
-   * affinity collapses to its doublings band alone.
+   * PROVISIONAL — set deliberately tight, and it must be re-measured on live
+   * data before that data exists in volume.
    *
-   * Do NOT simply raise it to ~0.9. `sustain` counts SNAPSHOTS above a delta
-   * threshold, so its value depends on polling cadence: a daily series scores
-   * far higher than the simulator's 6-per-day, where many intraday slots are
-   * flat. The number is not comparable across sources, which makes it unsafe
-   * to calibrate from this sample.
+   * Riser is meant to mean "steady, sustained climb", so sustain has to do
+   * real discriminating work. At the old 0.6 it may not have: on daily-cadence
+   * series (Chartmetric, 2026-08-11) sustain runs p10 0.80 · p50 0.91 · max
+   * 0.98, which would pin `clamp01(sustain / riserSustain)` at 1.0 and reduce
+   * Riser to its doublings band alone — i.e. "medium Moonshot".
    *
-   * The real fix is to make sustain cadence-invariant first — fraction of
-   * DAYS with meaningful growth rather than fraction of snapshots — and then
-   * recalibrate. Until then this stays put: raising it would tighten Riser,
-   * and thresholds may only ever loosen.
+   * That measurement does NOT transfer to production. `sustain` is the share
+   * of SNAPSHOTS carrying meaningful growth, and production polls every 2h
+   * (12/day, hourly for hot tracks) against Chartmetric's 1/day — see
+   * `jobs/poll.ts`. The simulator's 6/day yields a median near 0.47 on the
+   * same metric. We currently have NO measurement at production cadence on
+   * the real provider, so any value here is a judgement call.
+   *
+   * 0.75 is chosen to err tight, because the error is only recoverable in one
+   * direction: badges are never revoked, so a threshold that ships LOOSE can
+   * never be tightened without creating two populations holding the same badge
+   * under different rules. Shipping tight costs nothing — loosening later
+   * upgrades past picks for free, since badge_points is re-derived every
+   * settlement pass and `higherBadge` only ever moves up.
+   *
+   * This degrades gracefully rather than gating: affinity is continuous, so a
+   * sub-threshold sustain makes Riser less competitive, never impossible.
+   *
+   * ⚠ PRE-LAUNCH BLOCKER: re-measure once live picks have accumulated real
+   * 2h-cadence history. After the first real user earns a badge this number
+   * can only ever go DOWN.
    */
-  riserSustain: 0.6,
+  riserSustain: 0.75,
   /** 25% of real tracks reach 3 doublings; 70% sit below flatlineDoublings. */
   riserDoublings: 3,
   /**

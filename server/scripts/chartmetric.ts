@@ -25,6 +25,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { trajectorySignals } from "../src/scoring/badges.ts";
+import { AFFINITY } from "@firstfan/shared";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env.CORPUS_DB ?? path.join(HERE, "..", "firstfan-corpus.db");
@@ -523,13 +524,18 @@ function report(platform: string, since: string): void {
   const share = (v: number[], f: (x: number) => boolean) =>
     v.length ? `${((v.filter(f).length / v.length) * 100).toFixed(0)}%` : "—";
 
+  // Read the thresholds from the config rather than repeating them here —
+  // hardcoded copies silently lie the moment a value is tuned.
+  const A = AFFINITY;
+  const row = (name: string, v: number, result: string) =>
+    console.log(`  ${name.padEnd(18)} ${String(v).padEnd(6)} → ${result}`);
   console.log(`\nWhere the live thresholds fall:`);
-  console.log(`  moonshotDoublings  8      → ${share(doublings, (d) => d >= 8)} of tracks reach it`);
-  console.log(`  riserSustain       0.6    → ${share(sustain, (v) => v >= 0.6)} sustain at or above`);
-  console.log(`  riserDoublings     3      → ${share(doublings, (d) => d >= 3)} at or above`);
-  console.log(`  breakoutFloor      0.2    → ${share(burst, (v) => v >= 0.2)} burstShare at or above`);
-  console.log(`  breakoutFull       0.7    → ${share(burst, (v) => v >= 0.7)} at or above`);
-  console.log(`  flatlineDoublings  1.5    → ${share(doublings, (d) => d < 1.5)} below (reads as Flatline)`);
+  row("moonshotDoublings", A.moonshotDoublings, `${share(doublings, (d) => d >= A.moonshotDoublings)} of tracks reach it`);
+  row("riserSustain", A.riserSustain, `${share(sustain, (v) => v >= A.riserSustain)} sustain at or above`);
+  row("riserDoublings", A.riserDoublings, `${share(doublings, (d) => d >= A.riserDoublings)} at or above`);
+  row("breakoutFloor", A.breakoutFloor, `${share(burst, (v) => v >= A.breakoutFloor)} burstShare at or above`);
+  row("breakoutFull", A.breakoutFull, `${share(burst, (v) => v >= A.breakoutFull)} at or above`);
+  row("flatlineDoublings", A.flatlineDoublings, `${share(doublings, (d) => d < A.flatlineDoublings)} below (reads as Flatline)`);
   console.log(
     `\nNote: burstShare and peak are time-windowed so they compare across\n` +
       `cadences. sustain counts snapshots, so a daily series and the sim's\n` +
