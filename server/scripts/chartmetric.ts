@@ -445,52 +445,95 @@ async function platformStudy(label: string, want: number) {
   }
 
   const since = new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString().slice(0, 10);
-  const doublings: number[] = [];
   let noData = 0;
 
   console.log(`\n── pulling ${HISTORY_DAYS}d of ${ep.platform} ${ep.type} ──`);
   for (const id of ids) {
     if (calls >= budget - 1) { console.log("⚠ budget reached, stopping sample early"); break; }
-    const r = await cmGet(
-      tok,
-      `/track/${id}/${ep.platform}/stats/${ep.mode}?type=${ep.type}&since=${since}`,
-    );
-    if (!r.ok) { noData++; continue; }
-    const pts = realPoints(r.json);
+    const cached = cache
+      .prepare("SELECT payload FROM cm_history WHERE cm_track_id = ? AND platform = ? AND since = ?")
+      .get(id, ep.platform, since) as { payload: string } | undefined;
+
+    let json: any;
+    if (cached) {
+      json = JSON.parse(cached.payload);
+    } else {
+      const r = await cmGet(
+        tok,
+        `/track/${id}/${ep.platform}/stats/${ep.mode}?type=${ep.type}&since=${since}`,
+      );
+      if (!r.ok) { noData++; continue; }
+      json = r.json;
+      // Persist the RAW series, not the derived numbers. Every threshold we
+      // may want to check later is recomputable from this, for free.
+      cache
+        .prepare("INSERT OR REPLACE INTO cm_history VALUES (?, ?, ?, ?, ?)")
+        .run(id, ep.platform, since, JSON.stringify(json), new Date().toISOString());
+    }
+
+    const pts = realPoints(json);
     if (pts.length < 2) { noData++; continue; }
-
-    // Same function the live classifier uses, so the number is directly
-    // comparable to the thresholds in scoring-config.
-    const s = trajectorySignals(
-      pts[0]!.plays,
-      pts[0]!.capturedAt,
-      pts[pts.length - 1]!.capturedAt,
-      pts,
-    );
-    doublings.push(s.doublings);
-    console.log(
-      `  cm#${id}  ${pts.length} real points  ` +
-        `${pts[0]!.plays.toLocaleString()} → ${pts[pts.length - 1]!.plays.toLocaleString()}  ` +
-        `= ${s.doublings.toFixed(2)} doublings`,
-    );
   }
-
-  const sorted = doublings.slice().sort((a, b) => a - b);
-  console.log(
-    `\n${"=".repeat(64)}\nMEASURED 180-DAY DOUBLINGS ` +
-      `(${ep.platform} ${ep.type}, real points only)\n${"=".repeat(64)}`,
-  );
-  console.log(`tracks with usable history: ${sorted.length}   (no data: ${noData})`);
-  if (sorted.length) {
-    console.log(`  p50 ${pct(sorted, 50).toFixed(2)}   p90 ${pct(sorted, 90).toFixed(2)}   ` +
-      `p99 ${pct(sorted, 99).toFixed(2)}   max ${sorted[sorted.length - 1]!.toFixed(2)}`);
-    console.log(`\nSoundCloud projection for comparison: p50 0.38  p90 1.77  p99 2.63  max 2.78`);
-    console.log(`AFFINITY.moonshotDoublings is currently 8.`);
-    const over = sorted.filter((d) => d >= 8).length;
-    console.log(`tracks reaching 8 doublings: ${over} of ${sorted.length}`);
-  }
+  console.log(`fetched/cached ${ids.length - noData} series  (no data: ${noData})`);
+  report(ep.platform, since);
   console.log(
     `\ncredits spent: ${calls} of ${budget} (~$${(calls * USD_PER_CREDIT).toFixed(2)})`,
+  );
+}
+
+/** Print the distribution of every trajectory signal against its live threshold. */
+function line(name: string, vals: number[], dp = 2): void {
+  const s = vals.slice().sort((a, b) => a - b);
+  if (!s.length) { console.log(`${name.padEnd(12)} (no data)`); return; }
+  console.log(
+    `${name.padEnd(12)}` +
+      `${pct(s, 10).toFixed(dp).padStart(8)}` +
+      `${pct(s, 50).toFixed(dp).padStart(8)}` +
+      `${pct(s, 75).toFixed(dp).padStart(8)}` +
+      `${pct(s, 90).toFixed(dp).padStart(8)}` +
+      `${s[s.length - 1]!.toFixed(dp).padStart(8)}`,
+  );
+}
+
+/**
+ * Reads only from the local cache — costs nothing and can be re-run freely as
+ * thresholds change. This is why the raw payloads are stored.
+ */
+function report(platform: string, since: string): void {
+  const rows = cache
+    .prepare("SELECT cm_track_id, payload FROM cm_history WHERE platform = ? AND since = ?")
+    .all(platform, since) as unknown as { cm_track_id: number; payload: string }[];
+
+  const doublings: number[] = [], sustain: number[] = [], burst: number[] = [], peak: number[] = [];
+  for (const row of rows) {
+    const pts = realPoints(JSON.parse(row.payload));
+    if (pts.length < 2) continue;
+    const s = trajectorySignals(pts[0]!.plays, pts[0]!.capturedAt, pts[pts.length - 1]!.capturedAt, pts);
+    doublings.push(s.doublings); sustain.push(s.sustain);
+    burst.push(s.burstShare); peak.push(s.peak);
+  }
+
+  console.log(`\n${"=".repeat(64)}\nMEASURED TRAJECTORY SIGNALS — ${platform}, ${doublings.length} tracks\n${"=".repeat(64)}`);
+  console.log(`${"".padEnd(12)}${"p10".padStart(8)}${"p50".padStart(8)}${"p75".padStart(8)}${"p90".padStart(8)}${"max".padStart(8)}`);
+  line("doublings", doublings);
+  line("sustain", sustain);
+  line("burstShare", burst);
+  line("peak", peak);
+
+  const share = (v: number[], f: (x: number) => boolean) =>
+    v.length ? `${((v.filter(f).length / v.length) * 100).toFixed(0)}%` : "—";
+
+  console.log(`\nWhere the live thresholds fall:`);
+  console.log(`  moonshotDoublings  8      → ${share(doublings, (d) => d >= 8)} of tracks reach it`);
+  console.log(`  riserSustain       0.6    → ${share(sustain, (v) => v >= 0.6)} sustain at or above`);
+  console.log(`  riserDoublings     3      → ${share(doublings, (d) => d >= 3)} at or above`);
+  console.log(`  breakoutFloor      0.2    → ${share(burst, (v) => v >= 0.2)} burstShare at or above`);
+  console.log(`  breakoutFull       0.7    → ${share(burst, (v) => v >= 0.7)} at or above`);
+  console.log(`  flatlineDoublings  1.5    → ${share(doublings, (d) => d < 1.5)} below (reads as Flatline)`);
+  console.log(
+    `\nNote: burstShare and peak are time-windowed so they compare across\n` +
+      `cadences. sustain counts snapshots, so a daily series and the sim's\n` +
+      `6/day are not strictly equivalent — treat sustain as indicative.`,
   );
 }
 
@@ -513,12 +556,18 @@ if (cmd === "probe") {
     if (e instanceof BudgetExhausted) console.log(`\n⚠ ${e.message}`);
     else throw e;
   }
+} else if (cmd === "analyze") {
+  // Free: re-derives every signal from cached raw series. No network at all.
+  const since = new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString().slice(0, 10);
+  report(arg || "spotify", budgetArg || since);
 } else {
   console.log(
     "usage:\n" +
       "  chartmetric.ts probe      [perBucket=4] [creditBudget=60]  SoundCloud coverage\n" +
-      "  chartmetric.ts spotify    [tracks=40]   [creditBudget=60]  measured 180d doublings\n" +
-      "  chartmetric.ts applemusic [tracks=40]   [creditBudget=60]  same, Apple Music",
+      "  chartmetric.ts spotify    [tracks=40]   [creditBudget=60]  measured signals\n" +
+      "  chartmetric.ts soundcloud [tracks=40]   [creditBudget=60]  same, SoundCloud\n" +
+      "  chartmetric.ts applemusic [tracks=40]   [creditBudget=60]  same, Apple Music (unsupported)\n" +
+      "  chartmetric.ts analyze    [platform=spotify] [since]       re-analyze cache, FREE",
   );
   process.exit(1);
 }

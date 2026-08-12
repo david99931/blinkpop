@@ -147,11 +147,36 @@ export const AFFINITY = {
   juggernautBaselineFull: 5_000_000,
   juggernautGainFloor: 50_000,
   juggernautGainFull: 2_000_000,
-  /** Burst share below this reads as ordinary growth, not a breakout. */
+  /**
+   * Burst share below this reads as ordinary growth, not a breakout.
+   *
+   * CONFIRMED against 40 real Spotify series (2026-08-11, `npm run cm:analyze`).
+   * Measured burstShare: p10 0.05 · p50 0.07 · p75 0.15 · p90 0.28 · max 0.82.
+   * The floor admits the top 20% and full strength the top 3% — a sensible
+   * ramp for a badge, and these were simulator guesses that happened to land.
+   */
   breakoutFloor: 0.2,
   breakoutFull: 0.7,
   breakoutDoublings: 2,
+  /**
+   * ⚠ THIS PARAMETER CURRENTLY DOES NOTHING. Measured sustain on real daily
+   * series: p10 0.80 · p50 0.91 · p90 0.95 · max 0.98 — 95% of tracks clear
+   * 0.6, so `clamp01(sustain / riserSustain)` is pinned at 1.0 and the Riser
+   * affinity collapses to its doublings band alone.
+   *
+   * Do NOT simply raise it to ~0.9. `sustain` counts SNAPSHOTS above a delta
+   * threshold, so its value depends on polling cadence: a daily series scores
+   * far higher than the simulator's 6-per-day, where many intraday slots are
+   * flat. The number is not comparable across sources, which makes it unsafe
+   * to calibrate from this sample.
+   *
+   * The real fix is to make sustain cadence-invariant first — fraction of
+   * DAYS with meaningful growth rather than fraction of snapshots — and then
+   * recalibrate. Until then this stays put: raising it would tighten Riser,
+   * and thresholds may only ever loosen.
+   */
   riserSustain: 0.6,
+  /** 25% of real tracks reach 3 doublings; 70% sit below flatlineDoublings. */
   riserDoublings: 3,
   /**
    * Riser and Juggernaut FADE OUT as a run gets extreme, so the archetypes
