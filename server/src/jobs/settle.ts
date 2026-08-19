@@ -39,6 +39,8 @@ interface SettlePickRow {
   badge: Badge;
   badge_second: Badge | null;
   badge_purity: number | null;
+  /** null until the pick has been classified once — see the wasPure guard. */
+  badge_at: string | null;
   title: string;
   artist_name: string;
 }
@@ -48,7 +50,7 @@ export function settleDay(_simDayIndex: number): SettleResult {
     const picks = db
       .prepare(
         `SELECT p.id, p.user_id, p.track_id, p.picked_at, p.expires_at, p.pick_rank, p.kind,
-                p.artist_avg_plays, p.badge, p.badge_second, p.badge_purity,
+                p.artist_avg_plays, p.badge, p.badge_second, p.badge_purity, p.badge_at,
                 base.plays AS baseline_plays, t.title, t.artist_name
            FROM picks p
            JOIN track_snapshots base ON base.id = p.baseline_snapshot_id
@@ -87,7 +89,14 @@ export function settleDay(_simDayIndex: number): SettleResult {
       const badge = higherBadge(p.badge, verdict.badge);
       // Purity is an upgrade too: once a run has earned a PURE badge at this
       // primary it never reverts to a hybrid, same principle as the badge.
-      const wasPure = p.badge === badge && p.badge_second === null;
+      //
+      // `badge_at !== null` is load-bearing. The badge column DEFAULTS to
+      // 'flatline' with a null secondary, so without this check a pick being
+      // classified for the FIRST time as a flatline-primary hybrid looks
+      // identical to one that had already earned a pure Flatline — and the
+      // secondary was stripped and locked. That made Bolt unearnable outright
+      // and quietly degraded Ember and One Hit whenever flatline led.
+      const wasPure = p.badge_at !== null && p.badge === badge && p.badge_second === null;
       const secondary = wasPure ? null : badge === verdict.badge ? verdict.secondary : p.badge_second;
       // Keep the purity that JUSTIFIED the locked badge rather than the live
       // value — otherwise a pick reads "pure" beside a sub-threshold number.

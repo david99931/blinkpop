@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, type PortfolioData } from "../api.ts";
 import { Artwork, fmt, fmtPts, HoverBadge, useWorldVersion, worldChanged } from "../util.tsx";
-import { BADGE_META, BADGE_ORDER } from "../api.ts";
 import { BadgeChip } from "./BadgeChip.tsx";
+import { TrophyCase } from "./TrophyCase.tsx";
 
 function PickCard({
   pick,
@@ -140,29 +140,7 @@ export function Portfolio({ handle, myHandle }: { handle: string; myHandle: stri
         )}
       </div>
 
-      <div className="card section">
-        <div className="k" style={{ fontSize: 11, color: "var(--text-3)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-          Badge shelf
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: `repeat(${BADGE_ORDER.length}, 1fr)`,
-            gap: 6,
-            marginTop: 10,
-          }}
-        >
-          {BADGE_ORDER.map((b) => (
-            <div key={b} style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 22, opacity: data.shelf[b] ? 1 : 0.22 }}>{BADGE_META[b].icon}</div>
-              <div className="num" style={{ fontWeight: 800, fontSize: 16, opacity: data.shelf[b] ? 1 : 0.3 }}>
-                {data.shelf[b] ?? 0}
-              </div>
-              <div className="sub" style={{ fontSize: 10 }}>{BADGE_META[b].label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+      <TrophyCase picks={data.picks} />
       <div className="tiles" style={{ marginTop: 8 }}>
         <div className="tile">
           <div className="v num">🔥 {data.currentStreak}</div>
