@@ -1,8 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { underdogTierFor } from "@firstfan/shared";
-import { getDb } from "../db/db.ts";
-import { simNow } from "../sim/clock.ts";
+import { deleteLink, getLink, saveLink, validAccessToken } from "../domain/linked-accounts.ts";
 import { createUser, DomainError } from "../domain/users.ts";
 import {
   assertPasswordStrength,
@@ -33,47 +32,22 @@ function redirectUri(): string {
 const pendingConnects = new Map<string, { userId: number; verifier: string; expiresMs: number }>();
 
 function saveTokens(userId: number, providerUserId: string, displayName: string | null, t: ScUserTokens): void {
-  getDb()
-    .prepare(
-      `INSERT INTO connected_accounts
-         (user_id, provider, provider_user_id, display_name, access_token, refresh_token, token_expires_at, connected_at)
-       VALUES (?, 'soundcloud', ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(user_id, provider) DO UPDATE SET
-         provider_user_id = excluded.provider_user_id,
-         display_name = excluded.display_name,
-         access_token = excluded.access_token,
-         refresh_token = excluded.refresh_token,
-         token_expires_at = excluded.token_expires_at`,
-    )
-    .run(userId, providerUserId, displayName, t.accessToken, t.refreshToken, t.expiresAtIso, simNow().toISOString());
+  saveLink(userId, "soundcloud", providerUserId, displayName, t);
 }
 
-/** Valid access token for the user's linked account, refreshing if stale. */
+/**
+ * Valid SoundCloud access token for this user, refreshing if stale.
+ *
+ * Storage and the staleness rule live in `linked-accounts`; only the refresh
+ * call is SoundCloud-specific, so it is passed in. Spotify will supply its own
+ * and reuse everything else.
+ */
 async function userAccessToken(userId: number): Promise<string | null> {
-  const row = getDb()
-    .prepare(
-      "SELECT provider_user_id, display_name, access_token, refresh_token, token_expires_at FROM connected_accounts WHERE user_id = ? AND provider = 'soundcloud'",
-    )
-    .get(userId) as
-    | {
-        provider_user_id: string;
-        display_name: string | null;
-        access_token: string;
-        refresh_token: string | null;
-        token_expires_at: string | null;
-      }
-    | undefined;
-  if (!row) return null;
-  const stale =
-    row.token_expires_at !== null &&
-    Date.parse(row.token_expires_at) < Date.now() + 60_000;
-  if (!stale) return row.access_token;
-  if (!row.refresh_token) return null;
-  const config = soundCloudConfigFromEnv();
-  if (!config) return null;
-  const fresh = await refreshUserToken(config, row.refresh_token);
-  saveTokens(userId, row.provider_user_id, row.display_name, fresh);
-  return fresh.accessToken;
+  return validAccessToken(userId, "soundcloud", async (refreshToken) => {
+    const config = soundCloudConfigFromEnv();
+    if (!config) throw new Error("soundcloud not configured");
+    return refreshUserToken(config, refreshToken);
+  });
 }
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
@@ -169,13 +143,9 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.get("/api/me/soundcloud", async (req, reply) => {
     try {
       const user = requireUser(req);
-      const row = getDb()
-        .prepare(
-          "SELECT display_name, connected_at FROM connected_accounts WHERE user_id = ? AND provider = 'soundcloud'",
-        )
-        .get(user.id) as { display_name: string | null; connected_at: string } | undefined;
-      return row
-        ? { connected: true, username: row.display_name, connectedAt: row.connected_at }
+      const link = getLink(user.id, "soundcloud");
+      return link
+        ? { connected: true, username: link.displayName, connectedAt: link.connectedAt }
         : { connected: false };
     } catch (err) {
       const mapped = domainErrorToReply(err);
@@ -187,9 +157,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.delete("/api/me/soundcloud", async (req, reply) => {
     try {
       const user = requireUser(req);
-      getDb()
-        .prepare("DELETE FROM connected_accounts WHERE user_id = ? AND provider = 'soundcloud'")
-        .run(user.id);
+      deleteLink(user.id, "soundcloud");
       return { disconnected: true };
     } catch (err) {
       const mapped = domainErrorToReply(err);
