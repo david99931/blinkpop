@@ -24,7 +24,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { trajectorySignals } from "../src/scoring/badges.ts";
+import { badgeName, classifyByAffinity, trajectorySignals } from "../src/scoring/badges.ts";
 import { AFFINITY } from "@firstfan/shared";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -32,6 +32,8 @@ const DB_PATH = process.env.CORPUS_DB ?? path.join(HERE, "..", "firstfan-corpus.
 const API = "https://api.chartmetric.com/api";
 const PAUSE_MS = 1100; // entry API plans are documented at 1 request/sec
 const HISTORY_DAYS = 180;
+/** A cached series stays usable this long, so a moving date key cannot re-bill us. */
+const CACHE_FRESH_DAYS = 30;
 const USD_PER_CREDIT = 0.01;
 /** Hard stop. Real money — the script aborts rather than overrunning this. */
 const DEFAULT_BUDGET = 60;
@@ -451,9 +453,16 @@ async function platformStudy(label: string, want: number) {
   console.log(`\n── pulling ${HISTORY_DAYS}d of ${ep.platform} ${ep.type} ──`);
   for (const id of ids) {
     if (calls >= budget - 1) { console.log("⚠ budget reached, stopping sample early"); break; }
+    // NOT keyed on `since` — that is "today minus 180 days", so it moves every
+    // day and an exact-match cache would silently re-buy the whole sample on
+    // every later run. Any series fetched inside the freshness window will do.
+    const fresh = new Date(Date.now() - CACHE_FRESH_DAYS * 86_400_000).toISOString();
     const cached = cache
-      .prepare("SELECT payload FROM cm_history WHERE cm_track_id = ? AND platform = ? AND since = ?")
-      .get(id, ep.platform, since) as { payload: string } | undefined;
+      .prepare(
+        "SELECT payload FROM cm_history WHERE cm_track_id = ? AND platform = ? " +
+          "AND fetched_at >= ? ORDER BY fetched_at DESC LIMIT 1",
+      )
+      .get(id, ep.platform, fresh) as { payload: string } | undefined;
 
     let json: any;
     if (cached) {
@@ -500,18 +509,30 @@ function line(name: string, vals: number[], dp = 2): void {
  * Reads only from the local cache — costs nothing and can be re-run freely as
  * thresholds change. This is why the raw payloads are stored.
  */
-function report(platform: string, since: string): void {
+function report(platform: string, since?: string): void {
+  // Default to the newest cached window. Passing today's computed `since`
+  // would miss everything fetched on any earlier day.
+  const window = since ?? (cache
+    .prepare("SELECT MAX(since) AS s FROM cm_history WHERE platform = ?")
+    .get(platform) as { s: string | null } | undefined)?.s;
+  if (!window) { console.log(`no cached ${platform} history — run the study first`); return; }
   const rows = cache
     .prepare("SELECT cm_track_id, payload FROM cm_history WHERE platform = ? AND since = ?")
-    .all(platform, since) as unknown as { cm_track_id: number; payload: string }[];
+    .all(platform, window) as unknown as { cm_track_id: number; payload: string }[];
 
   const doublings: number[] = [], sustain: number[] = [], burst: number[] = [], peak: number[] = [];
+  const tally = new Map<string, number>();
   for (const row of rows) {
     const pts = realPoints(JSON.parse(row.payload));
     if (pts.length < 2) continue;
     const s = trajectorySignals(pts[0]!.plays, pts[0]!.capturedAt, pts[pts.length - 1]!.capturedAt, pts);
     doublings.push(s.doublings); sustain.push(s.sustain);
     burst.push(s.burstShare); peak.push(s.peak);
+    // The badge the REAL classifier would award, so measured rarity is
+    // an award rate rather than a threshold-crossing proxy.
+    const c = classifyByAffinity(s);
+    const k = badgeName(c.primary, c.secondary).label;
+    tally.set(k, (tally.get(k) ?? 0) + 1);
   }
 
   console.log(`\n${"=".repeat(64)}\nMEASURED TRAJECTORY SIGNALS — ${platform}, ${doublings.length} tracks\n${"=".repeat(64)}`);
@@ -536,6 +557,16 @@ function report(platform: string, since: string): void {
   row("breakoutFloor", A.breakoutFloor, `${share(burst, (v) => v >= A.breakoutFloor)} burstShare at or above`);
   row("breakoutFull", A.breakoutFull, `${share(burst, (v) => v >= A.breakoutFull)} at or above`);
   row("flatlineDoublings", A.flatlineDoublings, `${share(doublings, (d) => d < A.flatlineDoublings)} below (reads as Flatline)`);
+  const n = doublings.length;
+  console.log(`
+MEASURED BADGE RARITY (what BADGE_RARITY.trackShare comes from):`);
+  for (const [label, count] of [...tally].sort((a, b) => b[1] - a[1])) {
+    console.log(
+      `  ${label.padEnd(14)} ${String(count).padStart(3)}/${n}   ` +
+        `${((count / n) * 100).toFixed(1).padStart(5)}%`,
+    );
+  }
+
   console.log(
     `\nNote: burstShare and peak are time-windowed so they compare across\n` +
       `cadences. sustain counts snapshots, so a daily series and the sim's\n` +
@@ -564,8 +595,7 @@ if (cmd === "probe") {
   }
 } else if (cmd === "analyze") {
   // Free: re-derives every signal from cached raw series. No network at all.
-  const since = new Date(Date.now() - HISTORY_DAYS * 86_400_000).toISOString().slice(0, 10);
-  report(arg || "spotify", budgetArg || since);
+  report(arg || "spotify", budgetArg || undefined);
 } else {
   console.log(
     "usage:\n" +

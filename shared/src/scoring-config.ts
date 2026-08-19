@@ -223,6 +223,70 @@ export const HYBRID_NAMES: Record<string, { label: string; blurb: string; icon: 
   "flatline|moonshot": { label: "Bolt", icon: "🌩", blurb: "Nothing, nothing, nothing — then everything." },
 };
 
+export type RaritySource = "measured" | "estimated";
+
+/**
+ * How rare each badge is, as the share of TRACKS whose run earns it.
+ *
+ * Deliberately a fact about music rather than about our userbase. "3% of
+ * players have this" moves every time somebody signs up and means nothing at
+ * current scale; "only 3% of tracks ever do this" is stable, true on day one,
+ * and is the better flex besides — it describes how hard the thing is, not how
+ * few of us there are.
+ *
+ * LIVE, NOT FROZEN. Nothing is snapshotted onto a pick at award time: the
+ * number is read from here whenever a badge is rendered, so correcting a value
+ * updates every badge everywhere at once.
+ *
+ * ⚠ ALL FIFTEEN ARE `estimated`. We do have a real measurement — 40 Chartmetric
+ * Spotify series, via `npm run cm:analyze` — but it is drawn from the TOP of the
+ * catalogue, where 60% of tracks classify as Monolith because mega-hits are
+ * enormous and flat. Users pick SMALL tracks, which behave oppositely, so
+ * shipping those numbers would be honest arithmetic about the wrong population.
+ * The measurement did inform the extreme end: it puts Moonshot near 7.5%, which
+ * is close to the 2% used here for a small-track population.
+ *
+ * The calibration corpus is accumulating the right population. When it has
+ * enough history, flip entries to `measured` as they are confirmed — the source
+ * field exists so a guess is never later mistaken for a finding.
+ *
+ * Keys match badgeName(): a pure badge by its own name, a hybrid by its sorted
+ * pair, exactly as in HYBRID_NAMES.
+ */
+export const BADGE_RARITY: Record<string, { trackShare: number; source: RaritySource }> = {
+  // ── pure ──
+  flatline:   { trackShare: 55,   source: "estimated" },
+  riser:      { trackShare: 10,   source: "estimated" },
+  breakout:   { trackShare: 4,    source: "estimated" },
+  juggernaut: { trackShare: 1.5,  source: "estimated" },
+  moonshot:   { trackShare: 2,    source: "estimated" },
+  // ── hybrids ──
+  "flatline|riser":      { trackShare: 12,  source: "estimated" }, // Ember
+  "breakout|flatline":   { trackShare: 5,   source: "estimated" }, // One Hit
+  "breakout|riser":      { trackShare: 3,   source: "estimated" }, // Second Wind
+  "moonshot|riser":      { trackShare: 2.5, source: "estimated" }, // Ascendant
+  "flatline|moonshot":   { trackShare: 2,   source: "estimated" }, // Bolt
+  "breakout|moonshot":   { trackShare: 1.5, source: "estimated" }, // Supernova
+  "flatline|juggernaut": { trackShare: 1,   source: "estimated" }, // Monolith
+  "juggernaut|riser":    { trackShare: 0.8, source: "estimated" }, // Steamroller
+  "breakout|juggernaut": { trackShare: 0.5, source: "estimated" }, // Aftershock
+  "juggernaut|moonshot": { trackShare: 0.2, source: "estimated" }, // Titan
+};
+
+/** Rarity for a classification. Same key scheme as badgeName(). */
+export function rarityFor(
+  primary: (typeof BADGE_ORDER)[number],
+  secondary: (typeof BADGE_ORDER)[number] | null,
+): { trackShare: number; source: RaritySource } | null {
+  const key = secondary ? [primary, secondary].sort().join("|") : primary;
+  return BADGE_RARITY[key] ?? null;
+}
+
+/** "2%" · "0.8%" — trims the trailing zero so whole numbers read cleanly. */
+export function fmtRarity(trackShare: number): string {
+  return `${trackShare < 1 ? trackShare.toFixed(1) : String(trackShare)}%`;
+}
+
 /**
  * Entry multiple (v3) — how much of the run you actually called.
  *

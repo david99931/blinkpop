@@ -85,7 +85,8 @@ export function HoverBadge({
   kind,
   tipLeft,
 }: {
-  icon: string;
+  /** A string for emoji callers, or a node for real artwork (see BadgeMark). */
+  icon: React.ReactNode;
   text?: string;
   tip: React.ReactNode;
   kind?: "early" | "super";
