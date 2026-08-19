@@ -43,5 +43,5 @@ Two hard-won gotchas: endpoint paths must come from `apidocs.chartmetric.com/llm
 ## Non-negotiables from the spec
 - Scoring is a **pure function** of (pick, snapshot history, competing picks); settlement is idempotent via `score_events.dedupe_key`.
 - Game logic never imports provider-specific code — everything goes through the `MusicProvider` interface.
-- The §4.6 worked examples are pinned unit-test fixtures; the "one true early call beats a mega-hit run" ratio must hold.
+- The §4.6 balance invariant is pinned in `server/test/badge-balance.test.ts`, against the LIVE badge scoring. Restated for the badge model: scores are comparable only WITHIN a badge, so the global "early call beats a mega-hit run" comparison no longer means anything. What must hold is that **on the same track, calling it early dominates calling it late** — currently ~4.8x at equal rank, ~6.6x with rank decay. The old fixtures tested `scoring/engine.ts`, which settlement stopped calling when badges landed; that file and its 37 tests were deleted 2026-08-12.
 - Scoring numbers live in `shared/src/scoring-config.ts`, not hardcoded in logic.
