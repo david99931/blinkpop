@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { underdogTierFor } from "@firstfan/shared";
+import type { TrackDetails } from "@firstfan/shared";
 import { activeProviderName, getActiveProvider } from "../providers/index.ts";
 import { getDb } from "../db/db.ts";
 
@@ -87,18 +88,72 @@ export async function trackRoutes(app: FastifyInstance): Promise<void> {
     "/api/tracks/t/:providerTrackId",
     async (req, reply) => {
       const provider = getActiveProvider();
+      let track: Awaited<ReturnType<typeof provider.getTrack>> | null = null;
       try {
-        const track = await provider.getTrack(req.params.providerTrackId);
-        const tierInput = track.artistAvgPlays ?? track.stats.plays;
-        return {
-          track,
-          tier: tierInput === null ? null : underdogTierFor(tierInput),
-          embed: provider.getEmbed(req.params.providerTrackId),
-          ...trackPageExtras(req.params.providerTrackId),
-        };
+        track = await provider.getTrack(req.params.providerTrackId);
       } catch {
-        return reply.code(404).send({ error: "track_not_found" });
+        // Fall back to what we already stored. A track somebody PICKED must
+        // stay viewable even when the provider no longer serves it — deleted
+        // upstream, an API blip, or a track we hold that the active provider
+        // never knew about. Losing the page would strip a user of the evidence
+        // behind a badge they earned.
+        track = trackFromDb(req.params.providerTrackId);
       }
+      if (!track) return reply.code(404).send({ error: "track_not_found" });
+
+      const tierInput = track.artistAvgPlays ?? track.stats.plays;
+      return {
+        track,
+        tier: tierInput === null ? null : underdogTierFor(tierInput),
+        embed: provider.getEmbed(req.params.providerTrackId),
+        ...trackPageExtras(req.params.providerTrackId),
+      };
     },
   );
+}
+
+/**
+ * Rebuild a TrackDetails from our own tables — title and artist from `tracks`,
+ * stats from the newest snapshot. Used only when the provider cannot serve a
+ * track we already hold.
+ */
+function trackFromDb(providerTrackId: string): TrackDetails | null {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT t.id, t.provider, t.provider_track_id, t.title, t.artist_name,
+              t.artwork_url, t.permalink_url
+         FROM tracks t WHERE t.provider_track_id = ?`,
+    )
+    .get(providerTrackId) as
+    | { id: number; provider: string; provider_track_id: string; title: string;
+        artist_name: string; artwork_url: string | null; permalink_url: string | null }
+    | undefined;
+  if (!row) return null;
+
+  const snap = db
+    .prepare(
+      "SELECT plays, likes, reposts, captured_at FROM track_snapshots " +
+        "WHERE track_id = ? ORDER BY captured_at DESC LIMIT 1",
+    )
+    .get(row.id) as
+    | { plays: number | null; likes: number | null; reposts: number | null; captured_at: string }
+    | undefined;
+
+  return {
+    provider: row.provider as TrackDetails["provider"],
+    providerTrackId: row.provider_track_id,
+    title: row.title,
+    artistName: row.artist_name,
+    artworkUrl: row.artwork_url,
+    permalinkUrl: row.permalink_url,
+    currentPlays: snap?.plays ?? null,
+    artistAvgPlays: null,
+    stats: {
+      plays: snap?.plays ?? null,
+      likes: snap?.likes ?? null,
+      reposts: snap?.reposts ?? null,
+      fetchedAt: snap?.captured_at ?? new Date().toISOString(),
+    },
+  };
 }

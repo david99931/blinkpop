@@ -35,11 +35,36 @@ export function TrackPage({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [locked, setLocked] = useState(false);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   useEffect(() => {
-    void api.get<TrackPageData>(`/api/tracks/t/${id}`).then(setData);
-    void api.get<MyPicks>("/api/picks/me").then(setMine);
+    setLoadError(null);
+    // A rejected fetch used to leave `data` null forever, so any failure —
+    // a 404, a dropped connection — rendered as a permanent "Loading…".
+    void api
+      .get<TrackPageData>(`/api/tracks/t/${id}`)
+      .then(setData)
+      .catch((e: unknown) =>
+        setLoadError(e instanceof ApiError && e.status === 404
+          ? "That track is not available from the current provider."
+          : "Could not load this track."),
+      );
+    void api
+      .get<MyPicks>("/api/picks/me")
+      .then(setMine)
+      .catch(() => setLoadError("Could not load your picks."));
   }, [id, world]);
 
+  if (loadError) {
+    return (
+      <div className="empty">
+        {loadError}
+        <div style={{ marginTop: 10 }}>
+          <a className="btn small ghost" href="#/">Back</a>
+        </div>
+      </div>
+    );
+  }
   if (!data || !mine) return <div className="empty">Loading…</div>;
 
   const { track, tier } = data;

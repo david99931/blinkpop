@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { BADGE_ORDER, badgeName, type Badge, type PickView } from "../api.ts";
 import { fmtRarity, rarityFor } from "@firstfan/shared";
 import { BadgeMark } from "./BadgeMark.tsx";
+import { Artwork, fmt, fmtPts } from "../util.tsx";
 
 /**
  * The collection surface — every badge that EXISTS, not just the ones you have.
@@ -41,14 +43,17 @@ function allSlots(): { key: string; primary: Badge; second: Badge | null }[] {
 const SLOTS = allSlots();
 
 export function TrophyCase({ picks }: { picks: PickView[] }) {
-  // count + the highest-scoring pick that earned each badge
-  const owned = new Map<string, { count: number; best: PickView }>();
+  // Every pick per badge, best first — a slot opens into the full list rather
+  // than jumping to one track, so holding three Moonshots is legible as three.
+  const owned = new Map<string, PickView[]>();
   for (const p of picks) {
     const k = keyOf(p.badge, p.badgeSecond);
-    const cur = owned.get(k);
-    if (!cur) owned.set(k, { count: 1, best: p });
-    else owned.set(k, { count: cur.count + 1, best: p.points > cur.best.points ? p : cur.best });
+    owned.set(k, [...(owned.get(k) ?? []), p]);
   }
+  for (const list of owned.values()) list.sort((a, b) => b.points - a.points);
+
+  const [open, setOpen] = useState<string | null>(null);
+  const openList = open ? owned.get(open) : null;
 
   const collected = SLOTS.filter((s) => owned.has(s.key)).length;
 
@@ -109,38 +114,45 @@ export function TrophyCase({ picks }: { picks: PickView[] }) {
               >
                 {rarity ? fmtRarity(rarity.trackShare) : "—"} of tracks
               </div>
-              {has && has.count > 1 && (
+              {has && has.length > 1 && (
                 <div
                   className="num"
                   style={{ fontSize: 11, textAlign: "center", marginTop: 3, fontWeight: 800 }}
                 >
-                  ×{has.count}
+                  ×{has.length}
                 </div>
               )}
             </>
           );
 
+          const isOpen = open === slot.key;
           const style: React.CSSProperties = {
-            border: "1px solid var(--line)",
+            border: `1px solid ${isOpen ? "var(--gold)" : "var(--line)"}`,
             borderRadius: 8,
             padding: "11px 8px 10px",
             background: has ? "var(--bg-2)" : "transparent",
             borderStyle: has ? "solid" : "dashed",
             display: "block",
-            textDecoration: "none",
+            width: "100%",
+            textAlign: "inherit",
+            font: "inherit",
             color: "inherit",
+            cursor: has ? "pointer" : "default",
           };
 
-          // Earned slots link to the pick that earned them; locked ones are inert.
+          // Earned slots open the list of picks that earned them; locked ones
+          // are inert, but still readable so the goal stays visible.
           return has ? (
-            <a
+            <button
               key={slot.key}
-              href={`#/track/${has.best.providerTrackId}`}
+              type="button"
               style={style}
+              aria-expanded={isOpen}
+              onClick={() => setOpen(isOpen ? null : slot.key)}
               title={`${meta.label} — ${meta.blurb}`}
             >
               {body}
-            </a>
+            </button>
           ) : (
             <div key={slot.key} style={style} title={`${meta.label} — not yet called`}>
               {body}
@@ -148,6 +160,56 @@ export function TrophyCase({ picks }: { picks: PickView[] }) {
           );
         })}
       </div>
+
+      {open && openList && (
+        <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+            <div style={{ fontWeight: 700 }}>
+              {badgeName(
+                SLOTS.find((s) => s.key === open)!.primary,
+                SLOTS.find((s) => s.key === open)!.second,
+              ).label}
+              <span className="sub" style={{ fontWeight: 400 }}>
+                {" "}· {openList.length} {openList.length === 1 ? "call" : "calls"}
+              </span>
+            </div>
+            <button className="btn small ghost" onClick={() => setOpen(null)}>Close</button>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+            {openList.map((p) => (
+              <a
+                key={p.id}
+                className="row"
+                href={`#/track/${p.providerTrackId}`}
+                style={{
+                  gap: 10, alignItems: "center", textDecoration: "none",
+                  color: "inherit", padding: "6px 4px", borderRadius: 6,
+                }}
+              >
+                <Artwork id={p.providerTrackId} title={p.title} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontWeight: 600, overflow: "hidden",
+                      textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}
+                  >
+                    {p.title}
+                  </div>
+                  <div className="sub">
+                    {p.artistName}
+                    {p.baselinePlays !== null && ` · called at ${fmt(p.baselinePlays)}`}
+                  </div>
+                </div>
+                <div className="num" style={{ fontWeight: 700, whiteSpace: "nowrap" }}>
+                  {fmtPts(p.points)} pts
+                </div>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
