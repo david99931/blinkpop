@@ -94,7 +94,7 @@ export function TrophyCase({ picks }: { picks: PickView[] }) {
               <div
                 style={{
                   display: "flex", justifyContent: "center",
-                  color: has ? "var(--text-1)" : "var(--text-3)",
+                  color: has ? "var(--text)" : "var(--text-3)",
                   opacity: has ? 1 : 0.35,
                 }}
               >
@@ -127,10 +127,10 @@ export function TrophyCase({ picks }: { picks: PickView[] }) {
 
           const isOpen = open === slot.key;
           const style: React.CSSProperties = {
-            border: `1px solid ${isOpen ? "var(--gold)" : "var(--line)"}`,
+            border: `1px solid ${isOpen ? "var(--gold)" : "var(--border)"}`,
             borderRadius: 8,
             padding: "11px 8px 10px",
-            background: has ? "var(--bg-2)" : "transparent",
+            background: has ? "var(--surface-2)" : "transparent",
             borderStyle: has ? "solid" : "dashed",
             display: "block",
             width: "100%",
@@ -162,7 +162,7 @@ export function TrophyCase({ picks }: { picks: PickView[] }) {
       </div>
 
       {open && openList && (
-        <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+        <div style={{ marginTop: 14, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
             <div style={{ fontWeight: 700 }}>
               {badgeName(
