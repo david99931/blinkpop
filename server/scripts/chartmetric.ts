@@ -664,6 +664,95 @@ ${"=".repeat(74)}`);
   console.log(`credits spent: ${calls} (~$${(calls * USD_PER_CREDIT).toFixed(2)})`);
 }
 
+/**
+ * Taste SIZE — how big are the tracks this person actually listens to?
+ *
+ * Spotify removed `popularity`, so the size axis is unmeasurable from its API.
+ * Chartmetric restores it: the export gives Spotify URIs, get-ids resolves them
+ * exactly, and stream counts come back. This samples ACROSS someone's
+ * play-count distribution rather than taking the top, since the top of anyone's
+ * list is mainstream by definition and would say nothing about their tolerance.
+ *
+ * Resolutions are cached, and track size is a GLOBAL fact — so the marginal cost
+ * per additional user drops as the cache fills with shared catalogue.
+ */
+async function tasteSize(want: number) {
+  const historyDb = new DatabaseSync(
+    process.env.SPOTIFY_HISTORY_DB ?? path.join(HERE, "..", "firstfan-spotify.db"),
+  );
+  // Spread the sample over the whole distribution, not just the head.
+  const rows = historyDb
+    .prepare(
+      `SELECT track_name, artist_name, track_uri, play_count FROM spotify_track_history
+        WHERE user_id = 1 AND play_count >= 3
+        ORDER BY play_count DESC`,
+    )
+    .all() as unknown as { track_name: string; artist_name: string; track_uri: string; play_count: number }[];
+  historyDb.close();
+  if (!rows.length) { console.log("no imported history"); return; }
+
+  const step = Math.max(1, Math.floor(rows.length / want));
+  const sample = Array.from({ length: want }, (_, i) => rows[i * step]).filter(Boolean) as typeof rows;
+
+  const tok = await token();
+  console.log(`
+sampling ${sample.length} of ${rows.length} tracks across the distribution
+${"=".repeat(72)}`);
+
+  const streams: number[] = [];
+  for (const row of sample) {
+    if (calls >= budget - 3) { console.log("⚠ budget reached"); break; }
+    const spotifyId = row.track_uri.replace("spotify:track:", "");
+
+    const cached = cache.prepare("SELECT cm_track_id FROM cm_resolution WHERE provider_track_id = ?")
+      .get("spotify:" + spotifyId) as { cm_track_id: number | null } | undefined;
+    let cmId: number | null | undefined = cached?.cm_track_id;
+
+    if (cmId === undefined) {
+      const idRes = await cmGet(tok, `/track/spotify/${spotifyId}/get-ids`);
+      const o = unwrap(idRes.json);
+      const f = Array.isArray(o) ? o[0] : o;
+      cmId = f?.chartmetric_ids?.[0] ?? null;
+      cache.prepare("INSERT OR REPLACE INTO cm_resolution VALUES (?,?,?,?)")
+        .run("spotify:" + spotifyId, cmId, row.track_name, new Date().toISOString());
+    }
+    if (!cmId) { console.log(`  ✗ ${(row.track_name ?? "?").slice(0, 34)} — not in Chartmetric`); continue; }
+
+    const since = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+    const r = await cmGet(tok, `/track/${cmId}/spotify/stats/most-history?type=streams&since=${since}`);
+    if (!r.ok) { console.log(`  ~ ${(row.track_name ?? "?").slice(0, 34)} — stats HTTP ${r.status}`); continue; }
+    const pts = realPoints(r.json);
+    if (!pts.length) { console.log(`  ~ ${(row.track_name ?? "?").slice(0, 34)} — no points`); continue; }
+
+    const now = pts[pts.length - 1]!.plays!;
+    streams.push(now);
+    console.log(
+      `  ${String(row.play_count).padStart(4)}x  ${(row.track_name ?? "?").slice(0, 32).padEnd(32)} ` +
+        `${(row.artist_name ?? "?").slice(0, 16).padEnd(16)} ${now.toLocaleString().padStart(15)} streams`,
+    );
+  }
+
+  streams.sort((a, b) => a - b);
+  const p = (q: number) => streams[Math.floor((q / 100) * (streams.length - 1))] ?? 0;
+  console.log(`
+${"=".repeat(72)}`);
+  console.log(`SPOTIFY-SIDE TASTE SIZE — ${streams.length} tracks resolved`);
+  console.log(`  p10 ${p(10).toLocaleString()}`);
+  console.log(`  p50 ${p(50).toLocaleString()}`);
+  console.log(`  p90 ${p(90).toLocaleString()}`);
+  const bands: [number, number, string][] = [
+    [0, 1e6, "<1M"], [1e6, 1e7, "1M-10M"], [1e7, 1e8, "10M-100M"],
+    [1e8, 1e9, "100M-1B"], [1e9, Infinity, "1B+"],
+  ];
+  console.log(`  distribution:`);
+  for (const [lo, hi, label] of bands) {
+    const n = streams.filter((x) => x >= lo && x < hi).length;
+    if (n) console.log(`    ${label.padEnd(10)} ${String(n).padStart(3)}  ${((n / streams.length) * 100).toFixed(0)}%`);
+  }
+  console.log(`
+credits spent: ${calls} (~$${(calls * USD_PER_CREDIT).toFixed(2)})`);
+}
+
 const [cmd, arg, budgetArg] = process.argv.slice(2);
 if (cmd === "probe") {
   budget = Math.max(2, Number(budgetArg) || DEFAULT_BUDGET);
@@ -688,6 +777,16 @@ if (cmd === "probe") {
   console.log(`budget: ${budget} credits (~$${(budget * USD_PER_CREDIT).toFixed(2)}) — hard cap`);
   try {
     await earlyCall(Math.max(1, Math.min(40, Number(arg) || 10)));
+  } catch (e) {
+    if (e instanceof BudgetExhausted) console.log(`
+⚠ ${e.message}`);
+    else throw e;
+  }
+} else if (cmd === "tastesize") {
+  budget = Math.max(4, Number(budgetArg) || DEFAULT_BUDGET);
+  console.log(`budget: ${budget} credits (~$${(budget * USD_PER_CREDIT).toFixed(2)}) — hard cap`);
+  try {
+    await tasteSize(Math.max(1, Math.min(40, Number(arg) || 14)));
   } catch (e) {
     if (e instanceof BudgetExhausted) console.log(`
 ⚠ ${e.message}`);

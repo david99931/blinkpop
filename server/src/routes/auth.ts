@@ -14,6 +14,7 @@ import {
 import { mapTrack, scUserGet, type ScTrack } from "../providers/soundcloud.ts";
 import { soundcloudAccessToken } from "../domain/provider-tokens.ts";
 import { buildTasteProfile } from "../domain/taste.ts";
+import { listeningStats } from "../domain/listening-stats.ts";
 import { domainErrorToReply, requireUser } from "./users.ts";
 
 /** Pending OAuth handshakes: state → who started it + PKCE verifier. */
@@ -145,6 +146,24 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       }
     });
   }
+
+  /**
+   * Listening statistics from the imported Spotify history.
+   *
+   * Serves the user's fun facts AND the distribution shapes we need to design
+   * discovery around — concentration, the tail, and the mid-tail seed set.
+   */
+  app.get("/api/me/stats", async (req, reply) => {
+    try {
+      const user = requireUser(req);
+      return listeningStats(user.id);
+    } catch (err) {
+      const mapped = domainErrorToReply(err);
+      if (mapped) return reply.code(mapped.status).send(mapped.body);
+      req.log.warn(err);
+      return reply.code(500).send({ error: "stats_unavailable" });
+    }
+  });
 
   /** Every platform this user has linked, for the settings screen. */
   app.get("/api/me/connections", async (req, reply) => {

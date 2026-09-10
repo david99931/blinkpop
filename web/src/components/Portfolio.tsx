@@ -133,10 +133,14 @@ export function Portfolio({ handle, myHandle }: { handle: string; myHandle: stri
           <h1 className="h1" style={{ marginBottom: 0 }}>@{data.user.handle}</h1>
           <p className="sub">{data.user.displayName}</p>
         </div>
-        {!isMe && following !== null && (
-          <button className={`btn small${follows ? " ghost" : ""}`} onClick={() => void toggleFollow()}>
-            {follows ? "Following ✓" : "Follow"}
-          </button>
+        {isMe ? (
+          <a className="btn small ghost" href="#/stats">📊 Listening</a>
+        ) : (
+          following !== null && (
+            <button className={`btn small${follows ? " ghost" : ""}`} onClick={() => void toggleFollow()}>
+              {follows ? "Following ✓" : "Follow"}
+            </button>
+          )
         )}
       </div>
 

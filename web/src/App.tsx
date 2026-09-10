@@ -10,6 +10,7 @@ import { Leaderboard } from "./components/Leaderboard.tsx";
 import { Trending } from "./components/Trending.tsx";
 import { Inbox } from "./components/Inbox.tsx";
 import { Settings } from "./components/Settings.tsx";
+import { Stats } from "./components/Stats.tsx";
 import { WarpControl } from "./components/WarpControl.tsx";
 
 export default function App() {
@@ -57,6 +58,7 @@ export default function App() {
     : page === "feed" ? <Feed />
     : page === "trends" ? <Trending />
     : page === "board" ? <Leaderboard meId={me.id} />
+    : page === "stats" ? <Stats />
     : page === "inbox" ? <Inbox />
     : page === "settings" ? <Settings me={me} />
     : <Home handle={me.handle} />;

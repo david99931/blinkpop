@@ -237,6 +237,32 @@ export interface AuthResult {
   token: string;
 }
 
+/** /api/me/stats — fun facts for the user, taste shape for designing discovery. */
+export interface ListeningStats {
+  imported: boolean;
+  totals: {
+    hours: number; tracks: number; artists: number; plays: number;
+    spanStart: string | null; spanEnd: string | null; importedAt: string | null;
+  };
+  topArtists: ArtistStat[];
+  topTracks: { title: string; artist: string; plays: number; hours: number; firstPlayed: string }[];
+  loyalties: ArtistStat[];
+  byYear: { year: string; newArtists: number; newTracks: number }[];
+  concentration: { topN: number; share: number }[];
+  tail: { bucket: string; artists: number; share: number }[];
+  oneAndDone: { tracks: number; share: number };
+  seedArtists: ArtistStat[];
+}
+
+export interface ArtistStat {
+  name: string;
+  plays: number;
+  hours: number;
+  trackCount: number;
+  firstPlayed: string;
+  lastPlayed: string;
+}
+
 /** One row of /api/me/connections — every linkable platform, connected or not. */
 export interface ConnectionInfo {
   provider: string;
