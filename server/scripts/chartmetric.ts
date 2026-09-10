@@ -574,6 +574,96 @@ MEASURED BADGE RARITY (what BADGE_RARITY.trackShare comes from):`);
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Early-call check — can we PROVE someone was early?
+//
+// A first-played date on its own is just a date. The claim "you were on this
+// before it blew up" needs the track's play count AT that moment, which Spotify
+// has never exposed. Chartmetric does have dated stream history, and unlike the
+// SoundCloud attempt the resolution here is EXACT: the export gives us Spotify
+// track URIs and /track/spotify/{id}/get-ids accepts them directly, so there is
+// no fuzzy name matching to produce false positives.
+//
+// The open question this answers is how far back the history actually reaches.
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface Candidate {
+  track_name: string; artist_name: string; track_uri: string;
+  first_played: string; play_count: number;
+}
+
+async function earlyCall(want: number) {
+  const historyDb = new DatabaseSync(
+    process.env.SPOTIFY_HISTORY_DB ?? path.join(HERE, "..", "firstfan-spotify.db"),
+  );
+  const rows = historyDb
+    .prepare(
+      `SELECT track_name, artist_name, track_uri, first_played, play_count
+         FROM spotify_track_history
+        WHERE user_id = 1 AND play_count >= 40
+        ORDER BY first_played
+        LIMIT ?`,
+    )
+    .all(want) as unknown as Candidate[];
+  historyDb.close();
+  if (!rows.length) { console.log("no imported history — run npm run spotify:import first"); return; }
+
+  const tok = await token();
+  console.log(`
+checking ${rows.length} early calls
+${"=".repeat(74)}`);
+
+  let resolved = 0, withHistory = 0, provable = 0;
+  let earliestPointSeen: string | null = null;
+
+  for (const row of rows) {
+    if (calls >= budget - 3) { console.log("⚠ budget reached"); break; }
+    const spotifyId = row.track_uri.replace("spotify:track:", "");
+    const label = `${(row.track_name ?? "?").slice(0, 30).padEnd(30)} ${(row.artist_name ?? "?").slice(0, 16).padEnd(16)}`;
+
+    const idRes = await cmGet(tok, `/track/spotify/${spotifyId}/get-ids`);
+    if (!idRes.ok) { console.log(`  ✗ ${label} resolve HTTP ${idRes.status}`); continue; }
+    const o = unwrap(idRes.json);
+    const first = Array.isArray(o) ? o[0] : o;
+    const cmId: number | undefined = first?.chartmetric_ids?.[0] ?? first?.cm_track;
+    if (!cmId) { console.log(`  ✗ ${label} not in Chartmetric`); continue; }
+    resolved++;
+
+    // Ask from well before the first play, to find the true start of coverage.
+    const since = row.first_played.slice(0, 10);
+    const r = await cmGet(tok, `/track/${cmId}/spotify/stats/most-history?type=streams&since=${since}`);
+    if (!r.ok) { console.log(`  ~ ${label} cm#${cmId} stats HTTP ${r.status}`); continue; }
+
+    const pts = realPoints(r.json);
+    if (pts.length < 2) { console.log(`  ~ ${label} cm#${cmId} no usable points`); continue; }
+    withHistory++;
+
+    const earliest = pts[0]!;
+    const latest = pts[pts.length - 1]!;
+    if (!earliestPointSeen || earliest.capturedAt < earliestPointSeen) earliestPointSeen = earliest.capturedAt;
+
+    // Provable only if coverage actually starts at or before the first play.
+    const covered = earliest.capturedAt.slice(0, 10) <= since;
+    if (covered) provable++;
+    const mult = earliest.plays! > 0 ? latest.plays! / earliest.plays! : 0;
+
+    console.log(
+      `  ${covered ? "✓" : "·"} ${label} played ${since}
+` +
+        `      cm#${String(cmId).padEnd(9)} data from ${earliest.capturedAt.slice(0, 10)}  ` +
+        `${earliest.plays!.toLocaleString()} → ${latest.plays!.toLocaleString()} streams  ${mult.toFixed(1)}x`,
+    );
+  }
+
+  console.log(`
+${"=".repeat(74)}`);
+  console.log(`resolved to Chartmetric : ${resolved}/${rows.length}`);
+  console.log(`with usable history     : ${withHistory}`);
+  console.log(`PROVABLY early (coverage reaches the first play): ${provable}`);
+  console.log(`earliest data point seen anywhere: ${earliestPointSeen?.slice(0, 10) ?? "none"}`);
+  console.log(`credits spent: ${calls} (~$${(calls * USD_PER_CREDIT).toFixed(2)})`);
+}
+
 const [cmd, arg, budgetArg] = process.argv.slice(2);
 if (cmd === "probe") {
   budget = Math.max(2, Number(budgetArg) || DEFAULT_BUDGET);
@@ -591,6 +681,16 @@ if (cmd === "probe") {
     await platformStudy(cmd, Math.max(1, Math.min(100, Number(arg) || 40)));
   } catch (e) {
     if (e instanceof BudgetExhausted) console.log(`\n⚠ ${e.message}`);
+    else throw e;
+  }
+} else if (cmd === "earlycall") {
+  budget = Math.max(4, Number(budgetArg) || DEFAULT_BUDGET);
+  console.log(`budget: ${budget} credits (~$${(budget * USD_PER_CREDIT).toFixed(2)}) — hard cap`);
+  try {
+    await earlyCall(Math.max(1, Math.min(40, Number(arg) || 10)));
+  } catch (e) {
+    if (e instanceof BudgetExhausted) console.log(`
+⚠ ${e.message}`);
     else throw e;
   }
 } else if (cmd === "analyze") {

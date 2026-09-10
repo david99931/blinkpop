@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, setToken, type ScStatus, type UserInfo } from "../api.ts";
+import { api, setToken, type ConnectionInfo, type UserInfo } from "../api.ts";
 import { worldChanged } from "../util.tsx";
 import {
   DEFAULT_PREFS,
@@ -44,20 +44,30 @@ function Choice<T extends string>({
   );
 }
 
-/** SoundCloud account link — lives here now that Settings exists. */
-function SoundCloudRow() {
-  const [status, setStatus] = useState<ScStatus | null>(null);
-  const [busy, setBusy] = useState(false);
+/**
+ * Every linkable platform, driven by /api/me/connections rather than one
+ * hardcoded row per provider. A user can hold ANY combination at once —
+ * connected_accounts is keyed (user_id, provider) — and adding Apple Music
+ * later needs no change here at all.
+ */
+const PROVIDER_ICON: Record<string, string> = {
+  soundcloud: "☁️",
+  spotify: "🟢",
+  applemusic: "🍎",
+};
 
-  useEffect(() => {
-    void api.get<ScStatus>("/api/me/soundcloud").then(setStatus).catch(() => setStatus(null));
-  }, []);
-  if (!status) return null;
+const PROVIDER_BLURB: Record<string, string> = {
+  soundcloud: "Pick straight from your likes",
+  spotify: "Read your top artists and genres — powers your taste profile",
+};
+
+function ConnectionRow({ p, onChange }: { p: ConnectionInfo; onChange: () => void }) {
+  const [busy, setBusy] = useState(false);
 
   const connect = async () => {
     setBusy(true);
     try {
-      const { url } = await api.get<{ url: string }>("/api/auth/soundcloud/connect");
+      const { url } = await api.get<{ url: string }>(`/api/auth/${p.provider}/connect`);
       window.location.href = url;
     } catch {
       setBusy(false);
@@ -65,30 +75,65 @@ function SoundCloudRow() {
   };
   const disconnect = async () => {
     setBusy(true);
-    await api.delete("/api/me/soundcloud");
-    setStatus({ connected: false });
+    await api.delete(`/api/me/${p.provider}`);
     setBusy(false);
+    onChange();
   };
 
   return (
-    <div className="row" style={{ justifyContent: "space-between" }}>
-      <div>
-        <b>☁️ SoundCloud</b>
+    <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ minWidth: 0 }}>
+        <b>
+          {PROVIDER_ICON[p.provider] ?? "🎵"} {p.label}
+        </b>
         <p className="sub" style={{ margin: 0 }}>
-          {status.connected
-            ? `Connected as ${status.username ?? "your account"}`
-            : "Connect to pick straight from your likes"}
+          {!p.configured
+            ? "Not configured on this server"
+            : p.connected
+              ? `Connected as ${p.username ?? "your account"}`
+              : (PROVIDER_BLURB[p.provider] ?? "Connect this account")}
         </p>
       </div>
-      {status.connected ? (
+      {p.connected ? (
         <button className="btn small danger" disabled={busy} onClick={() => void disconnect()}>
           Disconnect
         </button>
       ) : (
-        <button className="btn small" disabled={busy} onClick={() => void connect()}>
+        <button className="btn small" disabled={busy || !p.configured} onClick={() => void connect()}>
           Connect
         </button>
       )}
+    </div>
+  );
+}
+
+function ConnectionsCard() {
+  const [providers, setProviders] = useState<ConnectionInfo[] | null>(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    void api
+      .get<{ providers: ConnectionInfo[] }>("/api/me/connections")
+      .then((d) => setProviders(d.providers))
+      .catch(() => setProviders(null));
+  }, [tick]);
+
+  if (!providers) return null;
+  const linked = providers.filter((p) => p.connected).length;
+
+  return (
+    <div className="card section">
+      <h2 className="h2">Connected accounts</h2>
+      <p className="sub" style={{ marginTop: 0 }}>
+        {linked > 1
+          ? "Linking more than one sharpens your taste profile — where they agree is the strongest signal."
+          : "Link more than one and we can tell what you actually listen to, not just what one app sees."}
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 12 }}>
+        {providers.map((p) => (
+          <ConnectionRow key={p.provider} p={p} onChange={() => setTick((t) => t + 1)} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -189,7 +234,7 @@ export function Settings({ me }: { me: UserInfo }) {
 
       <div className="card section">
         <h2 className="h2">Connections</h2>
-        <SoundCloudRow />
+        <ConnectionsCard />
       </div>
 
       <div className="card section">

@@ -23,7 +23,9 @@
     "cm:analyze": "npm exec --workspace server -- tsx scripts/chartmetric.ts analyze",
     "sustain:diff": "npm exec --workspace server -- tsx scripts/sustain-diff.ts",
     "examples": "npm exec --workspace server -- tsx scripts/worked-examples.ts",
-    "seed:trophy": "npm exec --workspace server -- tsx scripts/seed-trophy.ts"
+    "seed:trophy": "npm exec --workspace server -- tsx scripts/seed-trophy.ts",
+    "spotify:import": "npm exec --workspace server -- tsx scripts/import-spotify-history.ts",
+    "cm:early": "npm exec --workspace server -- tsx scripts/chartmetric.ts earlycall"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,

@@ -14,8 +14,21 @@
 import { getDb } from "../db/db.ts";
 import { simNow } from "../sim/clock.ts";
 
-/** Providers a user can link. The game provider is separate — see MusicProvider. */
-export type LinkProvider = "soundcloud" | "spotify";
+/**
+ * Providers a user can link. The game provider is separate — see MusicProvider.
+ *
+ * A user may hold ANY combination of these at once; `connected_accounts` is
+ * keyed (user_id, provider), so linking one never displaces another. Adding a
+ * platform means adding it here and registering a taste source — nothing else
+ * in the merge, storage or route layers is aware of how many exist.
+ *
+ * Apple Music is the expected next one. Note its auth is NOT OAuth2: MusicKit
+ * issues a long-lived user token with no refresh token, which this schema
+ * already handles — refresh_token and token_expires_at are both nullable, and
+ * validAccessToken returns the stored token unchanged when there is no expiry.
+ */
+export const LINK_PROVIDERS = ["soundcloud", "spotify"] as const;
+export type LinkProvider = (typeof LINK_PROVIDERS)[number];
 
 export interface LinkTokens {
   accessToken: string;
@@ -130,7 +143,14 @@ export async function validAccessToken(
 
   try {
     const fresh = await refresh(link.refreshToken);
-    saveLink(userId, provider, link.providerUserId, link.displayName, fresh);
+    // A refresh response commonly OMITS refresh_token, meaning "keep using the
+    // one you have" — Spotify does this on most refreshes. Writing the null
+    // through would wipe it and permanently break re-authentication, with the
+    // damage only surfacing an hour later when the access token expired.
+    saveLink(userId, provider, link.providerUserId, link.displayName, {
+      ...fresh,
+      refreshToken: fresh.refreshToken ?? link.refreshToken,
+    });
     return fresh.accessToken;
   } catch {
     // A revoked or rotated refresh token is a reconnect prompt, not a crash.

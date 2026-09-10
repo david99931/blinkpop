@@ -33,6 +33,17 @@ Commands: `npm run cm:probe` (SoundCloud coverage), `cm:spotify`, `cm:sc`, `cm:a
 
 Two hard-won gotchas: endpoint paths must come from `apidocs.chartmetric.com/llms-full.txt`, NOT the third-party api-evangelist OpenAPI spec, whose track-stats path is missing the `{mode}` segment and 404s. And when a parameter is rejected, the 400 body ENUMERATES the valid values — sending a deliberately wrong one is the cheapest way to discover an undocumented enum. Billing is usage-based at $0.01/credit; every call goes through one `spend()` cap so a loop bug can't overrun.
 
+## Spotify (`server/src/providers/spotify.ts`, `scripts/import-spotify-history.ts`)
+A **taste source only** — the Web API exposes `popularity` (0-100) and no play counts, so Spotify tracks can never be picked or scored. That is why the game runs on SoundCloud.
+
+Two findings verified live 2026-09-10, both of which contradict the docs:
+- **Artist `genres` no longer exist.** An artist object carries exactly `external_urls, href, id, images, name, type, uri` — no `genres`, no `popularity`, absent rather than empty, and missing from `/artists/{id}` too. 0 of 50 top artists on a real account had genres. **Genre vocabulary comes from SoundCloud tags now**; Spotify contributes names and play weight.
+- **Early calls cannot be proved retroactively.** Chartmetric resolves Spotify URIs exactly (8/8 via `/track/spotify/{id}/get-ids`), but its stream history starts ~2020-07. Pre-2020 first-plays were already past a billion streams when coverage begins. Personal history and user-vs-user ordering still work; absolute "it had 400k when you called it" does not.
+
+`npm run spotify:import <dir>` ingests an extended streaming history export into `server/firstfan-spotify.db` (gitignored). Aggregates on import; plays under 30s are dropped as skips (half the rows on real data). **`ip_addr`, `conn_country`, `platform`, `incognito_mode` are read and discarded** — the discard list is explicit so new fields default to being ignored.
+
+Account linking is provider-agnostic (`domain/linked-accounts.ts` + `providers/oauth-registry.ts`): a user may hold any combination at once, and `/api/me/taste` merges them into ONE profile where cross-source agreement is boosted. Apple Music needs no migration — its MusicKit token has no refresh and no expiry, which the schema already allows.
+
 ## Commands (run from repo root)
 - `npm run dev` — API server (port 3001)
 - `npm run dev:web` — Vite dev server (port 5173, proxies `/api` → 3001)

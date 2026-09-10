@@ -8,3 +8,4 @@ dist/
 .env.*
 firstfan-corpus.db*
 *.log
+.spotify-export/

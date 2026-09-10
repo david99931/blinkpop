@@ -237,6 +237,16 @@ export interface AuthResult {
   token: string;
 }
 
+/** One row of /api/me/connections — every linkable platform, connected or not. */
+export interface ConnectionInfo {
+  provider: string;
+  label: string;
+  configured: boolean;
+  connected: boolean;
+  username: string | null;
+  connectedAt: string | null;
+}
+
 export interface ScStatus {
   connected: boolean;
   username?: string | null;

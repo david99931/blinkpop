@@ -52,6 +52,10 @@ export interface ScTrack {
   playback_count?: number | null;
   favoritings_count?: number | null;
   reposts_count?: number | null;
+  /** Single primary genre. Free text, so casing and wording vary wildly. */
+  genre?: string | null;
+  /** Space-separated tags; multi-word ones are quoted. See parseTagList. */
+  tag_list?: string | null;
   user?: { id: number; username?: string; avatar_url?: string | null } | null;
 }
 
