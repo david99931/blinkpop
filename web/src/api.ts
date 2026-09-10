@@ -237,6 +237,24 @@ export interface AuthResult {
   token: string;
 }
 
+/** /api/me/listener-profile — four axes, and where discovery should start. */
+export interface ListenerAxis {
+  value: number;
+  confidence: number;
+  source: string;
+  note: string;
+}
+
+export interface ListenerProfile {
+  breadth: ListenerAxis;
+  activity: ListenerAxis;
+  mainstream: ListenerAxis;
+  digging: ListenerAxis;
+  label: string;
+  targetBand: { min: number; max: number; centre: number };
+  reasoning: string;
+}
+
 /** /api/me/stats — fun facts for the user, taste shape for designing discovery. */
 export interface ListeningStats {
   imported: boolean;

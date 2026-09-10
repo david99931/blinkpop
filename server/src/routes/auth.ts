@@ -15,6 +15,7 @@ import { mapTrack, scUserGet, type ScTrack } from "../providers/soundcloud.ts";
 import { soundcloudAccessToken } from "../domain/provider-tokens.ts";
 import { buildTasteProfile } from "../domain/taste.ts";
 import { listeningStats } from "../domain/listening-stats.ts";
+import { listenerProfile } from "../domain/listener-profile.ts";
 import { domainErrorToReply, requireUser } from "./users.ts";
 
 /** Pending OAuth handshakes: state → who started it + PKCE verifier. */
@@ -162,6 +163,26 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       if (mapped) return reply.code(mapped.status).send(mapped.body);
       req.log.warn(err);
       return reply.code(500).send({ error: "stats_unavailable" });
+    }
+  });
+
+  /**
+   * What kind of listener this is, and where discovery should START them.
+   *
+   * Four axes rather than one label, because "broad + mainstream" and
+   * "broad + underground" are both samplers who need opposite treatment. The
+   * output that matters is targetBand — a prior to be adapted from what the
+   * user actually picks, not a verdict.
+   */
+  app.get("/api/me/listener-profile", async (req, reply) => {
+    try {
+      const user = requireUser(req);
+      return await listenerProfile(user.id);
+    } catch (err) {
+      const mapped = domainErrorToReply(err);
+      if (mapped) return reply.code(mapped.status).send(mapped.body);
+      req.log.warn(err);
+      return reply.code(500).send({ error: "profile_unavailable" });
     }
   });
 

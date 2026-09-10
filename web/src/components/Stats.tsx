@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type ListeningStats } from "../api.ts";
+import { api, type ListenerProfile, type ListeningStats } from "../api.ts";
 import { fmt } from "../util.tsx";
 
 /**
@@ -36,10 +36,12 @@ function Bar({ share, muted }: { share: number; muted?: boolean }) {
 
 export function Stats() {
   const [data, setData] = useState<ListeningStats | null>(null);
+  const [profile, setProfile] = useState<ListenerProfile | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     void api.get<ListeningStats>("/api/me/stats").then(setData).catch(() => setFailed(true));
+    void api.get<ListenerProfile>("/api/me/listener-profile").then(setProfile).catch(() => setProfile(null));
   }, []);
 
   if (failed) return <div className="empty">Could not load your listening stats.</div>;
@@ -209,6 +211,53 @@ export function Stats() {
           once. You sample far more than you repeat.
         </p>
       </div>
+
+      {/* ── the profile: what discovery does with all this ── */}
+      {profile && (
+        <div className="card section">
+          <h2 className="h2">Your listener profile</h2>
+          <p style={{ marginTop: 0 }}>
+            <b>{profile.label}</b>
+          </p>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 9, marginTop: 12 }}>
+            {(["digging", "breadth", "activity", "mainstream"] as const).map((k) => {
+              const a = profile[k];
+              return (
+                <div key={k}>
+                  <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
+                    <span>
+                      <b>{k}</b>{" "}
+                      {k === "digging" && <span className="sub">— matters most</span>}
+                    </span>
+                    <span className="num sub">
+                      {a.confidence === 0 ? "no data" : a.value.toFixed(2)}
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 4, opacity: a.confidence === 0 ? 0.3 : 1 }}>
+                    <Bar share={a.value * 100} muted={a.confidence === 0} />
+                  </div>
+                  <div className="sub" style={{ fontSize: 11, marginTop: 3 }}>{a.note}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div
+            style={{
+              marginTop: 16, paddingTop: 13, borderTop: "1px solid var(--border)",
+            }}
+          >
+            <div className="sub" style={{ marginBottom: 4 }}>Discovery would start you at</div>
+            <div className="num" style={{ fontSize: 19, fontWeight: 800 }}>
+              {fmt(profile.targetBand.min)} – {fmt(profile.targetBand.max)} plays
+            </div>
+            <p className="sub" style={{ fontSize: 12, marginTop: 6, marginBottom: 0 }}>
+              {profile.reasoning}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── the seed set ── */}
       <div className="card section">
