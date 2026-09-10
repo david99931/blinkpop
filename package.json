@@ -26,7 +26,8 @@
     "seed:trophy": "npm exec --workspace server -- tsx scripts/seed-trophy.ts",
     "spotify:import": "npm exec --workspace server -- tsx scripts/import-spotify-history.ts",
     "cm:early": "npm exec --workspace server -- tsx scripts/chartmetric.ts earlycall",
-    "cm:tastesize": "npm exec --workspace server -- tsx scripts/chartmetric.ts tastesize"
+    "cm:tastesize": "npm exec --workspace server -- tsx scripts/chartmetric.ts tastesize",
+    "discover": "npm exec --workspace server -- tsx scripts/discover.ts"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,

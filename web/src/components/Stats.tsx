@@ -256,6 +256,44 @@ export function Stats() {
               {profile.reasoning}
             </p>
           </div>
+
+          {/*
+            The dial is a RISK control, not just a mood one — playing safe caps
+            your ceiling, so the cost is shown rather than buried.
+          */}
+          <div style={{ marginTop: 18, paddingTop: 13, borderTop: "1px solid var(--border)" }}>
+            <div style={{ fontWeight: 700, marginBottom: 2 }}>How deep do you want to go?</div>
+            <p className="sub" style={{ fontSize: 12, marginTop: 0 }}>
+              A Moonshot needs a track to grow 256×, so where you start decides what's even
+              reachable.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
+              {profile.reachOptions.map((o) => {
+                const active = o.mode === profile.reach;
+                return (
+                  <div
+                    key={o.mode}
+                    style={{
+                      border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
+                      borderRadius: 8, padding: "9px 11px",
+                      background: active ? "var(--accent-dim)" : "transparent",
+                    }}
+                  >
+                    <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
+                      <b>{o.label}</b>
+                      <span className="num sub" style={{ whiteSpace: "nowrap" }}>
+                        {fmt(o.band.min)} – {fmt(o.band.max)}
+                      </span>
+                    </div>
+                    <div className="sub" style={{ fontSize: 12, marginTop: 2 }}>{o.blurb}</div>
+                    <div className="sub num" style={{ fontSize: 11, marginTop: 4 }}>
+                      Moonshot needs {fmt(o.moonshotNeeds)} plays
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 

@@ -15,7 +15,7 @@ import { mapTrack, scUserGet, type ScTrack } from "../providers/soundcloud.ts";
 import { soundcloudAccessToken } from "../domain/provider-tokens.ts";
 import { buildTasteProfile } from "../domain/taste.ts";
 import { listeningStats } from "../domain/listening-stats.ts";
-import { listenerProfile } from "../domain/listener-profile.ts";
+import { listenerProfile, REACH_MODES, type ReachMode } from "../domain/listener-profile.ts";
 import { domainErrorToReply, requireUser } from "./users.ts";
 
 /** Pending OAuth handshakes: state → who started it + PKCE verifier. */
@@ -174,10 +174,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
    * output that matters is targetBand — a prior to be adapted from what the
    * user actually picks, not a verdict.
    */
-  app.get("/api/me/listener-profile", async (req, reply) => {
+  app.get<{ Querystring: { reach?: string } }>("/api/me/listener-profile", async (req, reply) => {
     try {
       const user = requireUser(req);
-      return await listenerProfile(user.id);
+      const reach = (REACH_MODES as readonly string[]).includes(req.query.reach ?? "")
+        ? (req.query.reach as ReachMode)
+        : "balanced";
+      return await listenerProfile(user.id, reach);
     } catch (err) {
       const mapped = domainErrorToReply(err);
       if (mapped) return reply.code(mapped.status).send(mapped.body);

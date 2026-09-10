@@ -253,6 +253,12 @@ export interface ListenerProfile {
   label: string;
   targetBand: { min: number; max: number; centre: number };
   reasoning: string;
+  reach: string;
+  reachOptions: {
+    mode: string; label: string; blurb: string;
+    band: { min: number; max: number; centre: number };
+    moonshotNeeds: number;
+  }[];
 }
 
 /** /api/me/stats — fun facts for the user, taste shape for designing discovery. */

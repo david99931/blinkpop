@@ -61,6 +61,18 @@ export interface ListenerProfile {
   targetBand: { min: number; max: number; centre: number };
   /** Why this band, in one line, so the choice is auditable rather than magic. */
   reasoning: string;
+  /** The mode this band was built for. */
+  reach: ReachMode;
+  /**
+   * Every mode with its band and what it costs you — so the risk is legible
+   * rather than buried. `moonshotNeeds` is the play count a pick at that centre
+   * must reach to earn a Moonshot.
+   */
+  reachOptions: {
+    mode: ReachMode; label: string; blurb: string;
+    band: { min: number; max: number; centre: number };
+    moonshotNeeds: number;
+  }[];
 }
 
 const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
@@ -101,6 +113,48 @@ const median = (xs: number[]): number =>
   xs.length ? xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)]! : 0;
 
 
+
+/**
+ * How far off the beaten track to go — the user's own dial, not ours.
+ *
+ * Mood varies in a way no profile can capture: the same person wants safe
+ * bangers on Tuesday and unheard weirdness on Saturday. An explicit choice is
+ * also far cleaner signal than inferring intent from picks.
+ *
+ * It is a RISK dial, not just a taste one, because the band determines which
+ * badges are reachable at all. Moonshot needs 8 doublings — 256x — so a pick at
+ * 30,000 plays needs 7.7M to earn one, while a pick at 500 needs only 128k.
+ * Playing safe caps your ceiling, and the UI should say so.
+ */
+export const REACH_MODES = ["comfort", "balanced", "digging", "uncharted"] as const;
+export type ReachMode = (typeof REACH_MODES)[number];
+
+export const REACH_META: Record<ReachMode, { label: string; blurb: string; factor: number }> = {
+  comfort: {
+    label: "Comfort",
+    blurb: "Around what you already like. Safe, familiar, low ceiling.",
+    factor: 1.6,
+  },
+  balanced: {
+    label: "Balanced",
+    blurb: "Just below your usual — new, but recognisably your taste.",
+    factor: 1.0,
+  },
+  digging: {
+    label: "Digging",
+    blurb: "Genuinely under-played. Real room to run.",
+    factor: 0.18,
+  },
+  uncharted: {
+    label: "Uncharted",
+    blurb: "Almost nobody has heard these. Most go nowhere; the ones that don't are Moonshots.",
+    factor: 0.03,
+  },
+};
+
+/** Doublings Moonshot demands — mirrored from AFFINITY so the copy can't drift. */
+const MOONSHOT_MULTIPLE = 256;
+
 export interface BandResult {
   band: { min: number; max: number; centre: number };
   /** Fraction of the anchor we stepped down to — surfaced for the reasoning line. */
@@ -120,13 +174,18 @@ export interface BandResult {
  * put a 68k-plays listener onto 11k tracks, six times below anything they had
  * shown an appetite for.
  */
-export function bandFor(anchor: number | null, adventure: number, confidenceMass: number): BandResult {
+export function bandFor(
+  anchor: number | null,
+  adventure: number,
+  confidenceMass: number,
+  reach: ReachMode = "balanced",
+): BandResult {
   // Timid profiles step to 70% of what they like; bold ones to 25%.
-  const stepDown = 0.7 - 0.45 * adventure;
+  const stepDown = (0.7 - 0.45 * adventure) * REACH_META[reach].factor;
   const centre = anchor
-    ? Math.max(200, Math.round(anchor * stepDown))
+    ? Math.max(120, Math.round(anchor * stepDown))
     // No SoundCloud signal: fall back to an abstract scale spanning ~630 to 1M.
-    : Math.round(1_000_000 * Math.pow(10, -3.2 * adventure));
+    : Math.max(120, Math.round(1_000_000 * Math.pow(10, -3.2 * adventure) * REACH_META[reach].factor));
 
   const spread = 1 + 2.5 * (1 - Math.min(1, confidenceMass / 4.5));
   return {
@@ -139,7 +198,10 @@ export function bandFor(anchor: number | null, adventure: number, confidenceMass
   };
 }
 
-export async function listenerProfile(userId: number): Promise<ListenerProfile> {
+export async function listenerProfile(
+  userId: number,
+  reach: ReachMode = "balanced",
+): Promise<ListenerProfile> {
   const stats = listeningStats(userId);
   const taste = await buildTasteProfile(userId);
 
@@ -217,7 +279,19 @@ export async function listenerProfile(userId: number): Promise<ListenerProfile> 
   const adventure = den > 0 ? num / den : 0.35;
 
   const anchor = scPlays.length ? median(scPlays) : null;
-  const { band: targetBand, stepDown } = bandFor(anchor, adventure, den);
+  const { band: targetBand, stepDown } = bandFor(anchor, adventure, den, reach);
+
+  // Every mode priced up, so the UI can show what playing safe actually costs.
+  const reachOptions = REACH_MODES.map((m) => {
+    const b = bandFor(anchor, adventure, den, m).band;
+    return {
+      mode: m,
+      label: REACH_META[m].label,
+      blurb: REACH_META[m].blurb,
+      band: b,
+      moonshotNeeds: b.centre * MOONSHOT_MULTIPLE,
+    };
+  });
 
   const words = [
     breadth.value > 0.6 ? "broad sampler" : breadth.value < 0.35 ? "focused listener" : "mixed listener",
@@ -231,6 +305,8 @@ export async function listenerProfile(userId: number): Promise<ListenerProfile> 
     breadth, activity, mainstream, digging,
     label: words.join(", "),
     targetBand,
+    reach,
+    reachOptions,
     reasoning: anchor
       ? `likes sit around ${anchor.toLocaleString()} plays; adventurousness ` +
         `${adventure.toFixed(2)} → step to ${(stepDown * 100).toFixed(0)}% of that, ` +
