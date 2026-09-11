@@ -44,6 +44,15 @@ Two findings verified live 2026-09-10, both of which contradict the docs:
 
 Account linking is provider-agnostic (`domain/linked-accounts.ts` + `providers/oauth-registry.ts`): a user may hold any combination at once, and `/api/me/taste` merges them into ONE profile where cross-source agreement is boosted. Apple Music needs no migration — its MusicKit token has no refresh and no expiry, which the schema already allows.
 
+## Discovery (`server/src/domain/discovery.ts`, `scripts/discover.ts`)
+Three passes against live SoundCloud: catalogues of artists the user already likes; genre search (which contributes directly at a mid band); then those search results mined for ARTIST IDs whose catalogues get walked — the only pass that reaches artists the user has never heard of. Search cannot reach the very small end at all, so the lower the band, the more the catalogue walk carries.
+
+**Bootlegs, edits, remixes and "slowed + reverb" flips are GOOD PICKS, not noise** (founder, EDM listener, 2026-09-10). In EDM the bootleg/edit circuit is where underground tracks actually break. Do not filter them out, deprioritise them, or treat them as low quality — they are a large share of what Uncharted surfaces and that is correct.
+
+Ranking is **smoothed** likes-per-play — `likes / (plays + 1000)`. The raw ratio is useless at the small end: 672 plays with 227 likes reads 33.8%, which is the artist's friends rather than a signal. The prior barely touches tracks big enough to have earned their ratio.
+
+The **reach dial** (`REACH_MODES`) is a risk control, not a mood one: Moonshot needs 256× growth, so the band decides what is reachable. Comfort makes a Moonshot ~53× harder than Uncharted, and the UI shows that number rather than hiding it.
+
 ## Commands (run from repo root)
 - `npm run dev` — API server (port 3001)
 - `npm run dev:web` — Vite dev server (port 5173, proxies `/api` → 3001)

@@ -16,6 +16,7 @@ import { soundcloudAccessToken } from "../domain/provider-tokens.ts";
 import { buildTasteProfile } from "../domain/taste.ts";
 import { listeningStats } from "../domain/listening-stats.ts";
 import { listenerProfile, REACH_MODES, type ReachMode } from "../domain/listener-profile.ts";
+import { cachedDiscovery, refreshDiscovery } from "../domain/discovery.ts";
 import { domainErrorToReply, requireUser } from "./users.ts";
 
 /** Pending OAuth handshakes: state → who started it + PKCE verifier. */
@@ -186,6 +187,54 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       if (mapped) return reply.code(mapped.status).send(mapped.body);
       req.log.warn(err);
       return reply.code(500).send({ error: "profile_unavailable" });
+    }
+  });
+
+  /**
+   * Discovery candidates for a reach mode. Served from cache — a full run makes
+   * ~57 SoundCloud calls and takes half a minute, which must never happen as a
+   * side effect of someone opening a page.
+   */
+  app.get<{ Querystring: { reach?: string } }>("/api/discover", async (req, reply) => {
+    try {
+      const user = requireUser(req);
+      const reach = (REACH_MODES as readonly string[]).includes(req.query.reach ?? "")
+        ? (req.query.reach as ReachMode)
+        : "balanced";
+      const cached = cachedDiscovery(user.id, reach);
+      const profile = await listenerProfile(user.id, reach);
+      return {
+        ...(cached ?? {
+          reach, band: profile.targetBand, computedAt: null,
+          apiCalls: 0, candidates: [], provenance: [],
+        }),
+        profile: {
+          label: profile.label,
+          reasoning: profile.reasoning,
+          reachOptions: profile.reachOptions,
+        },
+      };
+    } catch (err) {
+      const mapped = domainErrorToReply(err);
+      if (mapped) return reply.code(mapped.status).send(mapped.body);
+      req.log.warn(err);
+      return reply.code(500).send({ error: "discovery_unavailable" });
+    }
+  });
+
+  /** Explicit refresh. Slow and rate-limited by nature — never automatic. */
+  app.post<{ Querystring: { reach?: string } }>("/api/discover/refresh", async (req, reply) => {
+    try {
+      const user = requireUser(req);
+      const reach = (REACH_MODES as readonly string[]).includes(req.query.reach ?? "")
+        ? (req.query.reach as ReachMode)
+        : "balanced";
+      return await refreshDiscovery(user.id, reach);
+    } catch (err) {
+      const mapped = domainErrorToReply(err);
+      if (mapped) return reply.code(mapped.status).send(mapped.body);
+      req.log.error(err);
+      return reply.code(503).send({ error: "refresh_failed", message: (err as Error).message });
     }
   });
 

@@ -237,6 +237,39 @@ export interface AuthResult {
   token: string;
 }
 
+/** /api/discover — cached candidates for one reach mode. */
+export interface DiscoveryCandidate {
+  providerTrackId: string;
+  title: string;
+  artistName: string;
+  plays: number;
+  likes: number;
+  genre: string | null;
+  permalinkUrl: string | null;
+  artworkUrl: string | null;
+  createdAt: string | null;
+  via: string;
+  score: number;
+}
+
+export interface DiscoveryData {
+  reach: string;
+  band: { min: number; max: number };
+  computedAt: string | null;
+  apiCalls: number;
+  candidates: DiscoveryCandidate[];
+  provenance: { source: string; count: number }[];
+  profile: {
+    label: string;
+    reasoning: string;
+    reachOptions: {
+      mode: string; label: string; blurb: string;
+      band: { min: number; max: number; centre: number };
+      moonshotNeeds: number;
+    }[];
+  };
+}
+
 /** /api/me/listener-profile — four axes, and where discovery should start. */
 export interface ListenerAxis {
   value: number;

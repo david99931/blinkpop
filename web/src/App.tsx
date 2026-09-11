@@ -11,6 +11,7 @@ import { Trending } from "./components/Trending.tsx";
 import { Inbox } from "./components/Inbox.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { Stats } from "./components/Stats.tsx";
+import { Discover } from "./components/Discover.tsx";
 import { WarpControl } from "./components/WarpControl.tsx";
 
 export default function App() {
@@ -58,6 +59,7 @@ export default function App() {
     : page === "feed" ? <Feed />
     : page === "trends" ? <Trending />
     : page === "board" ? <Leaderboard meId={me.id} />
+    : page === "discover" ? <Discover />
     : page === "stats" ? <Stats />
     : page === "inbox" ? <Inbox />
     : page === "settings" ? <Settings me={me} />
@@ -100,8 +102,8 @@ export default function App() {
         <a className={tab("feed")} href="#/feed">
           <span className="ico">📡</span>Feed
         </a>
-        <a className={tab("trends")} href="#/trends">
-          <span className="ico">📈</span>Trends
+        <a className={tab("discover")} href="#/discover">
+          <span className="ico">🔦</span>Dig
         </a>
         <a className={tab("board")} href="#/board">
           <span className="ico">🏆</span>Board
